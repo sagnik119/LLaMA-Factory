@@ -45,7 +45,7 @@ def main():
         "rmsnorm_reg_target_norm": 0.0,
         
         # Element-specific capping (NEW FEATURE)
-        "rmsnorm_element_caps": "2.post_attention_layernorm.1251:0.1",
+        "rmsnorm_element_caps": "2.post_attention_layernorm.1251=0.1",
         "freeze_capped_elements": True,
         
         # Dataset configuration

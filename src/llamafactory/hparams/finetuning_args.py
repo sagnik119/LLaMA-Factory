@@ -380,7 +380,7 @@ class RMSNormRegularizationArguments:
     )
     rmsnorm_element_caps: Optional[str] = field(
         default=None,
-        metadata={"help": "Element-specific caps for RMSNorm parameters in format 'layer.param_type.element_idx:value' (e.g., '2.post_attention_layernorm.1251:0.1')."},
+        metadata={"help": "Element-specific caps for RMSNorm parameters in format 'layer.param_type.element_idx=value' (e.g., '2.post_attention_layernorm.1251=0.1')."},
     )
     freeze_capped_elements: bool = field(
         default=True,
@@ -510,15 +510,15 @@ class FinetuningArguments(
         if self.rmsnorm_element_caps:
             self.rmsnorm_element_caps_dict = {}
             for cap_spec in self.rmsnorm_element_caps.split(","):
-                if ":" in cap_spec:
-                    param_spec, value_str = cap_spec.strip().split(":", 1)
+                if "=" in cap_spec:
+                    param_spec, value_str = cap_spec.strip().split("=", 1)
                     try:
                         value = float(value_str)
                         self.rmsnorm_element_caps_dict[param_spec.strip()] = value
                     except ValueError:
                         raise ValueError(f"Invalid value in rmsnorm_element_caps: {cap_spec}")
                 else:
-                    raise ValueError(f"Invalid format in rmsnorm_element_caps: {cap_spec}. Expected 'layer.param_type.element_idx:value'")
+                    raise ValueError(f"Invalid format in rmsnorm_element_caps: {cap_spec}. Expected 'layer.param_type.element_idx=value'")
         else:
             self.rmsnorm_element_caps_dict = {}
         
