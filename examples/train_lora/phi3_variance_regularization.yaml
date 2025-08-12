@@ -49,3 +49,7 @@ variance_reg_norm_type: post_attention_layernorm
 ddp_backend: gloo
 max_grad_norm: 1.0
 save_total_limit: 3
+ddp_find_unused_parameters: false
+dataloader_pin_memory: true
+dataloader_num_workers: 4
+remove_unused_columns: false
