@@ -502,9 +502,8 @@ class FinetuningArguments(
         assert self.finetuning_type in ["lora", "freeze", "full"], "Invalid fine-tuning method."
         
         if self.rmsnorm_only_training and self.finetuning_type not in ["freeze", "full"]:
-            from ...extras import logging
-            logger = logging.get_logger(__name__)
-            logger.warning_rank0("RMSNorm-only training works best with 'freeze' or 'full' finetuning types.")
+            import warnings
+            warnings.warn("RMSNorm-only training works best with 'freeze' or 'full' finetuning types.")
         assert self.ref_model_quantization_bit in [None, 8, 4], "We only accept 4-bit or 8-bit quantization."
         assert self.reward_model_quantization_bit in [None, 8, 4], "We only accept 4-bit or 8-bit quantization."
 
