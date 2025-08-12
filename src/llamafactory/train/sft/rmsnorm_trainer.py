@@ -44,60 +44,68 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         # Store hooks for RMSNorm outputs
         self.rmsnorm_outputs = {}
         self.hooks = []
+        self._hooks_registered = False
         
-        if self.use_rmsnorm_regularization:
-            self._register_rmsnorm_hooks()
+        # Don't register hooks during initialization to avoid distributed training issues
+        # Hooks will be registered when training actually starts
 
     def _register_rmsnorm_hooks(self):
         """Register forward hooks to capture RMSNorm outputs from specified layers."""
-        # Get the actual model (unwrap from DDP if needed)
-        model = self.model
-        if hasattr(model, 'module'):
-            model = model.module
-        
-        # For Phi-3 models, the structure is typically:
-        # model.layers[i].post_attention_layernorm
-        for layer_idx in self.rmsnorm_reg_layers:
-            try:
-                # Try different possible paths for RMSNorm layers
-                possible_paths = [
-                    f"model.layers.{layer_idx}.post_attention_layernorm",
-                    f"layers.{layer_idx}.post_attention_layernorm",
-                    f"transformer.h.{layer_idx}.post_attention_layernorm",
-                    f"model.layers.{layer_idx}.ln_2",
-                    f"layers.{layer_idx}.ln_2"
-                ]
-                
-                rmsnorm_layer = None
-                for path in possible_paths:
-                    try:
-                        rmsnorm_layer = model
-                        for attr in path.split('.'):
-                            rmsnorm_layer = getattr(rmsnorm_layer, attr)
-                        break
-                    except AttributeError:
-                        continue
-                
-                if rmsnorm_layer is not None:
-                    def make_hook(layer_idx):
-                        def hook(module, input, output):
-                            # Store outputs in a thread-safe way for distributed training
-                            if not hasattr(self, '_rmsnorm_outputs_lock'):
-                                import threading
-                                self._rmsnorm_outputs_lock = threading.Lock()
-                            
-                            with self._rmsnorm_outputs_lock:
-                                self.rmsnorm_outputs[f"layer_{layer_idx}"] = output
-                        return hook
+        try:
+            # Get the actual model (unwrap from DDP if needed)
+            model = self.model
+            if hasattr(model, 'module'):
+                model = model.module
+            
+            # Initialize thread lock for distributed training
+            if not hasattr(self, '_rmsnorm_outputs_lock'):
+                import threading
+                self._rmsnorm_outputs_lock = threading.Lock()
+            
+            # For Phi-3 models, the structure is typically:
+            # model.layers[i].post_attention_layernorm
+            for layer_idx in self.rmsnorm_reg_layers:
+                try:
+                    # Try different possible paths for RMSNorm layers
+                    possible_paths = [
+                        f"model.layers.{layer_idx}.post_attention_layernorm",
+                        f"layers.{layer_idx}.post_attention_layernorm",
+                        f"transformer.h.{layer_idx}.post_attention_layernorm",
+                        f"model.layers.{layer_idx}.ln_2",
+                        f"layers.{layer_idx}.ln_2"
+                    ]
                     
-                    handle = rmsnorm_layer.register_forward_hook(make_hook(layer_idx))
-                    self.hooks.append(handle)
-                    logger.info_rank0(f"Registered RMSNorm hook for layer {layer_idx}")
-                else:
-                    logger.warning_rank0(f"Could not find RMSNorm layer for layer {layer_idx}")
+                    rmsnorm_layer = None
+                    for path in possible_paths:
+                        try:
+                            rmsnorm_layer = model
+                            for attr in path.split('.'):
+                                rmsnorm_layer = getattr(rmsnorm_layer, attr)
+                            break
+                        except AttributeError:
+                            continue
                     
-            except Exception as e:
-                logger.warning_rank0(f"Failed to register hook for layer {layer_idx}: {e}")
+                    if rmsnorm_layer is not None:
+                        def make_hook(layer_idx):
+                            def hook(module, input, output):
+                                # Store outputs in a thread-safe way for distributed training
+                                with self._rmsnorm_outputs_lock:
+                                    self.rmsnorm_outputs[f"layer_{layer_idx}"] = output.detach() if output is not None else None
+                            return hook
+                        
+                        handle = rmsnorm_layer.register_forward_hook(make_hook(layer_idx))
+                        self.hooks.append(handle)
+                        logger.info_rank0(f"Registered RMSNorm hook for layer {layer_idx}")
+                    else:
+                        logger.warning_rank0(f"Could not find RMSNorm layer for layer {layer_idx}")
+                        
+                except Exception as e:
+                    logger.warning_rank0(f"Failed to register hook for layer {layer_idx}: {e}")
+                    
+        except Exception as e:
+            logger.warning_rank0(f"Failed to register RMSNorm hooks: {e}")
+            # Don't fail training if hook registration fails
+            self.use_rmsnorm_regularization = False
 
     def _compute_rmsnorm_regularization_loss(self) -> torch.Tensor:
         """Compute regularization loss for RMSNorm outputs."""
@@ -134,13 +142,18 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
 
     @override
     def compute_loss(
-        self, 
-        model: "PreTrainedModel", 
-        inputs: Dict[str, Union[torch.Tensor, Any]], 
+        self,
+        model: "PreTrainedModel",
+        inputs: Dict[str, Union[torch.Tensor, Any]],
         return_outputs: bool = False,
         **kwargs
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Any]]:
         """Compute loss with RMSNorm regularization."""
+        
+        # Register hooks on first call (after distributed training is initialized)
+        if self.use_rmsnorm_regularization and not self._hooks_registered:
+            self._register_rmsnorm_hooks()
+            self._hooks_registered = True
         
         # Compute the standard loss
         if return_outputs:
