@@ -150,6 +150,33 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         else:
             return total_loss
 
+    @override
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        """Override save_model to handle Phi-3 model saving issues."""
+        try:
+            super().save_model(output_dir, _internal_call)
+        except FileNotFoundError as e:
+            if "modeling_flash_attention_utils.py" in str(e) or "integrations.py" in str(e):
+                logger.warning_rank0(f"Model saving failed due to transformers library issue: {e}")
+                logger.warning_rank0("This is a known issue with Phi-3 models and doesn't affect training.")
+                # Save only the state dict instead
+                if output_dir is None:
+                    output_dir = self.args.output_dir
+                
+                import torch
+                import os
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Save only trainable parameters (RMSNorm weights)
+                trainable_state_dict = {
+                    name: param for name, param in self.model.named_parameters()
+                    if param.requires_grad
+                }
+                torch.save(trainable_state_dict, os.path.join(output_dir, "rmsnorm_weights.pt"))
+                logger.info_rank0(f"Saved RMSNorm weights to {os.path.join(output_dir, 'rmsnorm_weights.pt')}")
+            else:
+                raise e
+
     def __del__(self):
         """Clean up hooks when trainer is destroyed."""
         for hook in self.hooks:
