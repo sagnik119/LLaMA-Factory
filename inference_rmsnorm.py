@@ -119,6 +119,7 @@ def generate_response(
             do_sample=do_sample,
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            use_cache=False,  # Disable cache to avoid compatibility issues
         )
     
     # Decode response
