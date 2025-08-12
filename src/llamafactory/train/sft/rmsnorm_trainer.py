@@ -50,7 +50,10 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
 
     def _register_rmsnorm_hooks(self):
         """Register forward hooks to capture RMSNorm outputs from specified layers."""
+        # Get the actual model (unwrap from DDP if needed)
         model = self.model
+        if hasattr(model, 'module'):
+            model = model.module
         
         # For Phi-3 models, the structure is typically:
         # model.layers[i].post_attention_layernorm
@@ -59,7 +62,7 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                 # Try different possible paths for RMSNorm layers
                 possible_paths = [
                     f"model.layers.{layer_idx}.post_attention_layernorm",
-                    f"layers.{layer_idx}.post_attention_layernorm", 
+                    f"layers.{layer_idx}.post_attention_layernorm",
                     f"transformer.h.{layer_idx}.post_attention_layernorm",
                     f"model.layers.{layer_idx}.ln_2",
                     f"layers.{layer_idx}.ln_2"
@@ -78,7 +81,13 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                 if rmsnorm_layer is not None:
                     def make_hook(layer_idx):
                         def hook(module, input, output):
-                            self.rmsnorm_outputs[f"layer_{layer_idx}"] = output
+                            # Store outputs in a thread-safe way for distributed training
+                            if not hasattr(self, '_rmsnorm_outputs_lock'):
+                                import threading
+                                self._rmsnorm_outputs_lock = threading.Lock()
+                            
+                            with self._rmsnorm_outputs_lock:
+                                self.rmsnorm_outputs[f"layer_{layer_idx}"] = output
                         return hook
                     
                     handle = rmsnorm_layer.register_forward_hook(make_hook(layer_idx))
@@ -92,12 +101,24 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
 
     def _compute_rmsnorm_regularization_loss(self) -> torch.Tensor:
         """Compute regularization loss for RMSNorm outputs."""
+        # Get device from model (handle DDP)
+        device = next(self.model.parameters()).device
+        
         if not self.rmsnorm_outputs:
-            return torch.tensor(0.0, device=self.model.device)
+            return torch.tensor(0.0, device=device)
         
-        total_reg_loss = torch.tensor(0.0, device=self.model.device)
+        total_reg_loss = torch.tensor(0.0, device=device)
         
-        for layer_name, output in self.rmsnorm_outputs.items():
+        # Thread-safe access to rmsnorm_outputs
+        if hasattr(self, '_rmsnorm_outputs_lock'):
+            with self._rmsnorm_outputs_lock:
+                outputs_copy = dict(self.rmsnorm_outputs)
+                self.rmsnorm_outputs.clear()
+        else:
+            outputs_copy = dict(self.rmsnorm_outputs)
+            self.rmsnorm_outputs.clear()
+        
+        for layer_name, output in outputs_copy.items():
             if output is not None:
                 # Compute row (token) norms - L2 norm across the feature dimension
                 # output shape: [batch_size, seq_len, hidden_size]
@@ -108,9 +129,6 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                 reg_loss = F.mse_loss(row_norms, target_norms)
                 
                 total_reg_loss += reg_loss
-                
-        # Clear stored outputs for next forward pass
-        self.rmsnorm_outputs.clear()
         
         return total_reg_loss
 
