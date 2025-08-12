@@ -372,10 +372,28 @@ def create_train_tab(engine: "Engine") -> dict[str, "Component"]:
             rmsnorm_reg_target_norm = gr.Slider(minimum=0, maximum=10, value=0.0, step=0.1)
         
         with gr.Row():
-            rmsnorm_element_caps = gr.Textbox(placeholder="e.g., 2.post_attention_layernorm.1251:0.1")
+            rmsnorm_element_caps = gr.Textbox(placeholder="e.g., 2.post_attention_layernorm.1251=0.1")
             freeze_capped_elements = gr.Checkbox(value=True)
+        
+        # Variance regularization section
+        gr.Markdown("### Variance Regularization")
+        with gr.Row():
+            use_variance_regularization = gr.Checkbox()
+            variance_reg_layers = gr.Textbox(placeholder="e.g., 2,4,6 (leave empty to use RMSNorm reg layers)")
+            variance_reg_weight = gr.Slider(minimum=0.0, maximum=10.0, value=1.0, step=0.1)
+            variance_reg_target = gr.Slider(minimum=0.1, maximum=5.0, value=1.0, step=0.1)
+        
+        with gr.Row():
+            variance_reg_norm_type = gr.Dropdown(
+                choices=["post_attention_layernorm", "input_layernorm", "both"],
+                value="post_attention_layernorm"
+            )
 
-    input_elems.update({rmsnorm_only_training, use_rmsnorm_regularization, rmsnorm_reg_layers, rmsnorm_reg_weight, rmsnorm_reg_target_norm, rmsnorm_element_caps, freeze_capped_elements})
+    input_elems.update({
+        rmsnorm_only_training, use_rmsnorm_regularization, rmsnorm_reg_layers, rmsnorm_reg_weight, rmsnorm_reg_target_norm,
+        rmsnorm_element_caps, freeze_capped_elements, use_variance_regularization, variance_reg_layers,
+        variance_reg_weight, variance_reg_target, variance_reg_norm_type
+    })
     elem_dict.update(
         dict(
             rmsnorm_tab=rmsnorm_tab,
@@ -386,6 +404,11 @@ def create_train_tab(engine: "Engine") -> dict[str, "Component"]:
             rmsnorm_reg_target_norm=rmsnorm_reg_target_norm,
             rmsnorm_element_caps=rmsnorm_element_caps,
             freeze_capped_elements=freeze_capped_elements,
+            use_variance_regularization=use_variance_regularization,
+            variance_reg_layers=variance_reg_layers,
+            variance_reg_weight=variance_reg_weight,
+            variance_reg_target=variance_reg_target,
+            variance_reg_norm_type=variance_reg_norm_type,
         )
     )
 

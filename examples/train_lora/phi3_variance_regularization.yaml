@@ -1,0 +1,51 @@
+### model
+model_name_or_path: microsoft/Phi-3-mini-4k-instruct
+
+### method
+stage: sft
+do_train: true
+finetuning_type: freeze
+rmsnorm_only_training: true
+
+### dataset
+dataset: identity
+dataset_dir: ./data
+template: phi
+cutoff_len: 1024
+max_samples: 100000
+overwrite_cache: true
+preprocessing_num_workers: 16
+
+### output
+output_dir: ./saves/phi3_variance_reg
+logging_steps: 10
+save_steps: 500
+plot_loss: true
+overwrite_output_dir: true
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+num_train_epochs: 10.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+
+### eval
+val_size: 0.1
+per_device_eval_batch_size: 1
+eval_strategy: steps
+eval_steps: 250
+
+### variance regularization
+use_variance_regularization: true
+variance_reg_layers: "2,4,6"
+variance_reg_weight: 1.0
+variance_reg_target: 1.0
+variance_reg_norm_type: post_attention_layernorm
+
+### distributed training
+ddp_backend: gloo
+max_grad_norm: 1.0
+save_total_limit: 3

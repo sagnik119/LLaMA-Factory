@@ -386,6 +386,28 @@ class RMSNormRegularizationArguments:
         default=True,
         metadata={"help": "Whether to freeze RMSNorm elements that have been capped."},
     )
+    
+    # Variance regularization parameters
+    use_variance_regularization: bool = field(
+        default=False,
+        metadata={"help": "Whether to apply variance regularization to RMSNorm outputs."},
+    )
+    variance_reg_layers: Optional[str] = field(
+        default=None,
+        metadata={"help": "Comma-separated list of layer indices to apply variance regularization (e.g., '2,4,6'). If None, uses rmsnorm_reg_layers."},
+    )
+    variance_reg_weight: float = field(
+        default=1.0,
+        metadata={"help": "Weight for the variance regularization loss."},
+    )
+    variance_reg_target: float = field(
+        default=1.0,
+        metadata={"help": "Target variance for the RMSNorm outputs."},
+    )
+    variance_reg_norm_type: str = field(
+        default="post_attention_layernorm",
+        metadata={"help": "Type of normalization layer to regularize ('post_attention_layernorm', 'input_layernorm', or 'both')."},
+    )
 
 
 @dataclass
@@ -505,6 +527,12 @@ class FinetuningArguments(
         self.galore_target: list[str] = split_arg(self.galore_target)
         self.apollo_target: list[str] = split_arg(self.apollo_target)
         self.rmsnorm_reg_layers: list[int] = [int(x.strip()) for x in self.rmsnorm_reg_layers.split(",") if x.strip()]
+        
+        # Parse variance regularization layers (use rmsnorm_reg_layers if not specified)
+        if self.variance_reg_layers:
+            self.variance_reg_layers: list[int] = [int(x.strip()) for x in self.variance_reg_layers.split(",") if x.strip()]
+        else:
+            self.variance_reg_layers: list[int] = self.rmsnorm_reg_layers
         
         # Parse RMSNorm element caps
         if self.rmsnorm_element_caps:

@@ -288,6 +288,14 @@ class Runner:
         if get("train.rmsnorm_element_caps"):
             args["rmsnorm_element_caps"] = get("train.rmsnorm_element_caps")
             args["freeze_capped_elements"] = get("train.freeze_capped_elements")
+        
+        # variance regularization config
+        if get("train.use_variance_regularization"):
+            args["use_variance_regularization"] = get("train.use_variance_regularization")
+            args["variance_reg_layers"] = get("train.variance_reg_layers") or None
+            args["variance_reg_weight"] = get("train.variance_reg_weight")
+            args["variance_reg_target"] = get("train.variance_reg_target")
+            args["variance_reg_norm_type"] = get("train.variance_reg_norm_type")
 
         # eval config
         if get("train.val_size") > 1e-6 and args["stage"] != "ppo":

@@ -4,10 +4,11 @@ This document describes the new functionality for training Phi-3 Mini 4K Instruc
 
 ## Overview
 
-The implementation adds two key features:
+The implementation adds three key features:
 
 1. **RMSNorm-only Training**: Fine-tune only the RMSNorm parameters while freezing all other model parameters
 2. **RMSNorm Output Regularization**: Apply regularization to post-attention RMSNorm outputs in specific layers to control row (token) norms
+3. **Variance Regularization**: Control the variance of RMSNorm output matrices to stabilize training (NEW!)
 
 ## New Configuration Parameters
 
@@ -18,6 +19,14 @@ The implementation adds two key features:
 - `rmsnorm_reg_weight` (float, default: 0.01): Weight for the regularization loss term
 - `rmsnorm_reg_target_norm` (float, default: 1.0): Target norm value for regularization
 - `rmsnorm_only_training` (bool, default: False): Train only RMSNorm parameters while freezing all others
+
+### Variance Regularization Arguments (NEW!)
+
+- `use_variance_regularization` (bool, default: False): Enable variance regularization for RMSNorm outputs
+- `variance_reg_layers` (str, optional): Comma-separated list of layer indices for variance regularization (uses rmsnorm_reg_layers if not specified)
+- `variance_reg_weight` (float, default: 1.0): Weight for the variance regularization loss term
+- `variance_reg_target` (float, default: 1.0): Target variance value for RMSNorm outputs
+- `variance_reg_norm_type` (str, default: "post_attention_layernorm"): Which norm layers to regularize ("post_attention_layernorm", "input_layernorm", or "both")
 
 ## Usage Examples
 
@@ -52,6 +61,45 @@ Use the provided configuration file:
 
 ```bash
 llamafactory-cli train examples/train_lora/phi3_rmsnorm_regularization.yaml
+```
+
+### 3. Variance Regularization Usage (NEW!)
+
+#### Command Line with Variance Regularization
+
+```bash
+llamafactory-cli train \
+    --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
+    --stage sft \
+    --do_train \
+    --finetuning_type freeze \
+    --rmsnorm_only_training \
+    --use_variance_regularization \
+    --variance_reg_layers "2,4,6" \
+    --variance_reg_weight 1.0 \
+    --variance_reg_target 1.0 \
+    --variance_reg_norm_type post_attention_layernorm \
+    --dataset identity \
+    --template phi \
+    --cutoff_len 1024 \
+    --output_dir ./saves/phi3-variance-reg \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 8 \
+    --learning_rate 5e-5 \
+    --num_train_epochs 3.0 \
+    --bf16
+```
+
+#### YAML Configuration for Variance Regularization
+
+```bash
+llamafactory-cli train examples/train_lora/phi3_variance_regularization.yaml
+```
+
+#### Python Script for Variance Regularization
+
+```bash
+python examples/train_lora/train_phi3_variance_reg.py
 ```
 
 ### 3. Python Script

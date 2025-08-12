@@ -41,8 +41,16 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         self.rmsnorm_reg_target_norm = finetuning_args.rmsnorm_reg_target_norm
         self.use_rmsnorm_regularization = finetuning_args.use_rmsnorm_regularization
         
+        # Variance regularization parameters
+        self.use_variance_regularization = finetuning_args.use_variance_regularization
+        self.variance_reg_layers = finetuning_args.variance_reg_layers
+        self.variance_reg_weight = finetuning_args.variance_reg_weight
+        self.variance_reg_target = finetuning_args.variance_reg_target
+        self.variance_reg_norm_type = finetuning_args.variance_reg_norm_type
+        
         # Store hooks for RMSNorm outputs
         self.rmsnorm_outputs = {}
+        self.variance_outputs = {}  # Separate storage for variance regularization
         self.hooks = []
         self._hooks_registered = False
         
@@ -62,17 +70,44 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                 import threading
                 self._rmsnorm_outputs_lock = threading.Lock()
             
-            # For Phi-3 models, the structure is typically:
-            # model.layers[i].post_attention_layernorm
-            for layer_idx in self.rmsnorm_reg_layers:
-                try:
+            # Register hooks for standard RMSNorm regularization
+            if self.use_rmsnorm_regularization:
+                self._register_norm_regularization_hooks(model, self.rmsnorm_reg_layers, "rmsnorm")
+            
+            # Register hooks for variance regularization
+            if self.use_variance_regularization:
+                self._register_norm_regularization_hooks(model, self.variance_reg_layers, "variance")
+                    
+        except Exception as e:
+            logger.warning_rank0(f"Failed to register RMSNorm hooks: {e}")
+            # Don't fail training if hook registration fails
+            self.use_rmsnorm_regularization = False
+            self.use_variance_regularization = False
+
+    def _register_norm_regularization_hooks(self, model, layer_indices, hook_type):
+        """Register hooks for norm regularization (either standard or variance)."""
+        for layer_idx in layer_indices:
+            try:
+                # Determine which norm types to hook based on configuration
+                norm_types = []
+                if hook_type == "variance":
+                    if self.variance_reg_norm_type == "post_attention_layernorm":
+                        norm_types = ["post_attention_layernorm"]
+                    elif self.variance_reg_norm_type == "input_layernorm":
+                        norm_types = ["input_layernorm"]
+                    elif self.variance_reg_norm_type == "both":
+                        norm_types = ["post_attention_layernorm", "input_layernorm"]
+                else:
+                    norm_types = ["post_attention_layernorm"]  # Default for standard regularization
+                
+                for norm_type in norm_types:
                     # Try different possible paths for RMSNorm layers
                     possible_paths = [
-                        f"model.layers.{layer_idx}.post_attention_layernorm",
-                        f"layers.{layer_idx}.post_attention_layernorm",
-                        f"transformer.h.{layer_idx}.post_attention_layernorm",
-                        f"model.layers.{layer_idx}.ln_2",
-                        f"layers.{layer_idx}.ln_2"
+                        f"model.layers.{layer_idx}.{norm_type}",
+                        f"layers.{layer_idx}.{norm_type}",
+                        f"transformer.h.{layer_idx}.{norm_type}",
+                        f"model.layers.{layer_idx}.ln_2" if norm_type == "post_attention_layernorm" else f"model.layers.{layer_idx}.ln_1",
+                        f"layers.{layer_idx}.ln_2" if norm_type == "post_attention_layernorm" else f"layers.{layer_idx}.ln_1"
                     ]
                     
                     rmsnorm_layer = None
@@ -86,26 +121,25 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                             continue
                     
                     if rmsnorm_layer is not None:
-                        def make_hook(layer_idx):
+                        def make_hook(layer_idx, norm_type, hook_type):
                             def hook(module, input, output):
                                 # Store outputs in a thread-safe way for distributed training
                                 with self._rmsnorm_outputs_lock:
-                                    self.rmsnorm_outputs[f"layer_{layer_idx}"] = output.detach() if output is not None else None
+                                    key = f"layer_{layer_idx}_{norm_type}"
+                                    if hook_type == "variance":
+                                        self.variance_outputs[key] = output.detach() if output is not None else None
+                                    else:
+                                        self.rmsnorm_outputs[key] = output.detach() if output is not None else None
                             return hook
                         
-                        handle = rmsnorm_layer.register_forward_hook(make_hook(layer_idx))
+                        handle = rmsnorm_layer.register_forward_hook(make_hook(layer_idx, norm_type, hook_type))
                         self.hooks.append(handle)
-                        logger.info_rank0(f"Registered RMSNorm hook for layer {layer_idx}")
+                        logger.info_rank0(f"Registered {hook_type} hook for layer {layer_idx} {norm_type}")
                     else:
-                        logger.warning_rank0(f"Could not find RMSNorm layer for layer {layer_idx}")
+                        logger.warning_rank0(f"Could not find {norm_type} layer for layer {layer_idx}")
                         
-                except Exception as e:
-                    logger.warning_rank0(f"Failed to register hook for layer {layer_idx}: {e}")
-                    
-        except Exception as e:
-            logger.warning_rank0(f"Failed to register RMSNorm hooks: {e}")
-            # Don't fail training if hook registration fails
-            self.use_rmsnorm_regularization = False
+            except Exception as e:
+                logger.warning_rank0(f"Failed to register {hook_type} hook for layer {layer_idx}: {e}")
 
     def _compute_rmsnorm_regularization_loss(self) -> torch.Tensor:
         """Compute regularization loss for RMSNorm outputs."""
@@ -140,6 +174,43 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         
         return total_reg_loss
 
+    def _compute_variance_regularization_loss(self) -> torch.Tensor:
+        """Compute variance regularization loss for RMSNorm outputs."""
+        # Get device from model (handle DDP)
+        device = next(self.model.parameters()).device
+        
+        if not self.variance_outputs:
+            return torch.tensor(0.0, device=device)
+        
+        total_var_loss = torch.tensor(0.0, device=device)
+        
+        # Thread-safe access to variance_outputs
+        if hasattr(self, '_rmsnorm_outputs_lock'):
+            with self._rmsnorm_outputs_lock:
+                outputs_copy = dict(self.variance_outputs)
+                self.variance_outputs.clear()
+        else:
+            outputs_copy = dict(self.variance_outputs)
+            self.variance_outputs.clear()
+        
+        for layer_name, output in outputs_copy.items():
+            if output is not None:
+                # Compute variance across the feature dimension for each token
+                # output shape: [batch_size, seq_len, hidden_size]
+                
+                # Compute variance for each token (across hidden dimensions)
+                token_variances = torch.var(output, dim=-1, unbiased=False)  # [batch_size, seq_len]
+                
+                # Target variance (regularize towards this value)
+                target_variance = torch.full_like(token_variances, self.variance_reg_target)
+                
+                # Variance regularization loss: encourage variances to be close to target
+                var_loss = F.mse_loss(token_variances, target_variance)
+                
+                total_var_loss += var_loss
+        
+        return total_var_loss
+
     @override
     def compute_loss(
         self,
@@ -151,7 +222,7 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         """Compute loss with RMSNorm regularization."""
         
         # Register hooks on first call (after distributed training is initialized)
-        if self.use_rmsnorm_regularization and not self._hooks_registered:
+        if (self.use_rmsnorm_regularization or self.use_variance_regularization) and not self._hooks_registered:
             self._register_rmsnorm_hooks()
             self._hooks_registered = True
         
@@ -161,20 +232,27 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         else:
             loss = super().compute_loss(model, inputs, return_outputs=False, **kwargs)
         
+        total_loss = loss
+        log_dict = {"train/base_loss": loss.item()}
+        
         # Add RMSNorm regularization loss if enabled
         if self.use_rmsnorm_regularization and model.training:
             reg_loss = self._compute_rmsnorm_regularization_loss()
-            total_loss = loss + self.rmsnorm_reg_weight * reg_loss
-            
-            # Log the regularization loss
-            if hasattr(self, 'log'):
-                self.log({
-                    "train/rmsnorm_reg_loss": reg_loss.item(),
-                    "train/base_loss": loss.item(),
-                    "train/total_loss": total_loss.item()
-                })
-        else:
-            total_loss = loss
+            total_loss = total_loss + self.rmsnorm_reg_weight * reg_loss
+            log_dict["train/rmsnorm_reg_loss"] = reg_loss.item()
+        
+        # Add variance regularization loss if enabled
+        if self.use_variance_regularization and model.training:
+            var_loss = self._compute_variance_regularization_loss()
+            total_loss = total_loss + self.variance_reg_weight * var_loss
+            log_dict["train/variance_reg_loss"] = var_loss.item()
+        
+        # Update total loss in log
+        log_dict["train/total_loss"] = total_loss.item()
+        
+        # Log all losses
+        if hasattr(self, 'log') and model.training:
+            self.log(log_dict)
         
         if return_outputs:
             return total_loss, outputs
@@ -213,7 +291,12 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
                     "rmsnorm_reg_layers": self.rmsnorm_reg_layers,
                     "rmsnorm_reg_weight": self.rmsnorm_reg_weight,
                     "rmsnorm_reg_target_norm": self.rmsnorm_reg_target_norm,
-                    "use_rmsnorm_regularization": self.use_rmsnorm_regularization
+                    "use_rmsnorm_regularization": self.use_rmsnorm_regularization,
+                    "use_variance_regularization": self.use_variance_regularization,
+                    "variance_reg_layers": self.variance_reg_layers,
+                    "variance_reg_weight": self.variance_reg_weight,
+                    "variance_reg_target": self.variance_reg_target,
+                    "variance_reg_norm_type": self.variance_reg_norm_type
                 }
                 with open(os.path.join(output_dir, "rmsnorm_config.json"), "w") as f:
                     json.dump(config_dict, f, indent=2)
