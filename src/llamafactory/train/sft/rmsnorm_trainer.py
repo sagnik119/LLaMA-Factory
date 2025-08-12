@@ -155,9 +155,9 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
         """Override save_model to handle Phi-3 model saving issues."""
         try:
             super().save_model(output_dir, _internal_call)
-        except FileNotFoundError as e:
-            # Handle all transformers library file not found errors for Phi-3
-            if "/transformers/models/phi3/" in str(e) or "..generation.py" in str(e) or "..modeling_flash_attention_utils.py" in str(e) or "..integrations.py" in str(e):
+        except (FileNotFoundError, Exception) as e:
+            # Handle all transformers library errors for Phi-3 model saving
+            if isinstance(e, FileNotFoundError) or "custom_object_save" in str(e) or "phi3" in str(e).lower():
                 logger.warning_rank0(f"Model saving failed due to transformers library issue: {e}")
                 logger.warning_rank0("This is a known issue with Phi-3 models and doesn't affect training.")
                 # Save only the state dict instead
