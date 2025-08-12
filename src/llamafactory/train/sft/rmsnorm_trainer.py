@@ -131,7 +131,7 @@ class RMSNormRegularizedTrainer(CustomSeq2SeqTrainer):
             loss = super().compute_loss(model, inputs, return_outputs=False, **kwargs)
         
         # Add RMSNorm regularization loss if enabled
-        if self.use_rmsnorm_regularization and self.training:
+        if self.use_rmsnorm_regularization and model.training:
             reg_loss = self._compute_rmsnorm_regularization_loss()
             total_loss = loss + self.rmsnorm_reg_weight * reg_loss
             
