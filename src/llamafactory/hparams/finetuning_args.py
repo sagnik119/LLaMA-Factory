@@ -378,6 +378,14 @@ class RMSNormRegularizationArguments:
         default=False,
         metadata={"help": "Whether to train only RMSNorm parameters while freezing all others."},
     )
+    rmsnorm_element_caps: Optional[str] = field(
+        default=None,
+        metadata={"help": "Element-specific caps for RMSNorm parameters in format 'layer.param_type.element_idx:value' (e.g., '2.post_attention_layernorm.1251:0.1')."},
+    )
+    freeze_capped_elements: bool = field(
+        default=True,
+        metadata={"help": "Whether to freeze RMSNorm elements that have been capped."},
+    )
 
 
 @dataclass
@@ -497,6 +505,23 @@ class FinetuningArguments(
         self.galore_target: list[str] = split_arg(self.galore_target)
         self.apollo_target: list[str] = split_arg(self.apollo_target)
         self.rmsnorm_reg_layers: list[int] = [int(x.strip()) for x in self.rmsnorm_reg_layers.split(",") if x.strip()]
+        
+        # Parse RMSNorm element caps
+        if self.rmsnorm_element_caps:
+            self.rmsnorm_element_caps_dict = {}
+            for cap_spec in self.rmsnorm_element_caps.split(","):
+                if ":" in cap_spec:
+                    param_spec, value_str = cap_spec.strip().split(":", 1)
+                    try:
+                        value = float(value_str)
+                        self.rmsnorm_element_caps_dict[param_spec.strip()] = value
+                    except ValueError:
+                        raise ValueError(f"Invalid value in rmsnorm_element_caps: {cap_spec}")
+                else:
+                    raise ValueError(f"Invalid format in rmsnorm_element_caps: {cap_spec}. Expected 'layer.param_type.element_idx:value'")
+        else:
+            self.rmsnorm_element_caps_dict = {}
+        
         self.use_ref_model = self.stage == "dpo" and self.pref_loss not in ["orpo", "simpo"]
 
         assert self.finetuning_type in ["lora", "freeze", "full"], "Invalid fine-tuning method."

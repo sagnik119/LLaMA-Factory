@@ -283,6 +283,11 @@ class Runner:
             args["rmsnorm_reg_layers"] = get("train.rmsnorm_reg_layers")
             args["rmsnorm_reg_weight"] = get("train.rmsnorm_reg_weight")
             args["rmsnorm_reg_target_norm"] = get("train.rmsnorm_reg_target_norm")
+        
+        # rmsnorm element capping config
+        if get("train.rmsnorm_element_caps"):
+            args["rmsnorm_element_caps"] = get("train.rmsnorm_element_caps")
+            args["freeze_capped_elements"] = get("train.freeze_capped_elements")
 
         # eval config
         if get("train.val_size") > 1e-6 and args["stage"] != "ppo":

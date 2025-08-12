@@ -47,6 +47,9 @@ def _setup_rmsnorm_tuning(
 
     logger.info_rank0("Fine-tuning method: RMSNorm-only")
     
+    # Apply element-specific caps first (before freezing/unfreezing)
+    _apply_rmsnorm_element_caps(model, finetuning_args)
+    
     # First freeze all parameters
     for param in model.parameters():
         param.requires_grad_(False)
@@ -63,6 +66,72 @@ def _setup_rmsnorm_tuning(
             logger.info_rank0(f"Unfrozen RMSNorm parameter: {name}")
     
     logger.info_rank0(f"Total RMSNorm parameters unfrozen: {rmsnorm_count}")
+
+def _apply_rmsnorm_element_caps(model: "PreTrainedModel", finetuning_args: "FinetuningArguments") -> None:
+    """
+    Apply element-specific caps to RMSNorm parameters and optionally freeze them.
+    
+    Args:
+        model: The model to apply caps to
+        finetuning_args: Fine-tuning arguments containing element cap specifications
+    """
+    if not hasattr(finetuning_args, 'rmsnorm_element_caps_dict') or not finetuning_args.rmsnorm_element_caps_dict:
+        return
+    
+    logger.info_rank0("Applying RMSNorm element caps...")
+    
+    for param_spec, cap_value in finetuning_args.rmsnorm_element_caps_dict.items():
+        # Parse parameter specification: layer.param_type.element_idx
+        parts = param_spec.split('.')
+        if len(parts) != 3:
+            logger.warning_rank0(f"Invalid parameter specification: {param_spec}. Expected format: 'layer.param_type.element_idx'")
+            continue
+        
+        layer_idx, param_type, element_idx = parts
+        try:
+            layer_idx = int(layer_idx)
+            element_idx = int(element_idx)
+        except ValueError:
+            logger.warning_rank0(f"Invalid layer or element index in: {param_spec}")
+            continue
+        
+        # Find the parameter in the model
+        param_name = f"model.layers.{layer_idx}.{param_type}.weight"
+        param = None
+        
+        for name, p in model.named_parameters():
+            if name == param_name:
+                param = p
+                break
+        
+        if param is None:
+            logger.warning_rank0(f"Parameter not found: {param_name}")
+            continue
+        
+        # Check if element index is valid
+        if element_idx >= param.size(0):
+            logger.warning_rank0(f"Element index {element_idx} out of range for parameter {param_name} (size: {param.size(0)})")
+            continue
+        
+        # Apply the cap
+        with torch.no_grad():
+            original_value = param.data[element_idx].item()
+            param.data[element_idx] = cap_value
+            logger.info_rank0(f"Capped {param_name}[{element_idx}] from {original_value:.6f} to {cap_value:.6f}")
+        
+        # Freeze the element if requested
+        if finetuning_args.freeze_capped_elements:
+            # Create a custom hook to freeze this specific element
+            def create_freeze_hook(param_tensor, idx):
+                def freeze_element_hook(grad):
+                    if grad is not None:
+                        grad[idx] = 0.0
+                    return grad
+                return freeze_element_hook
+            
+            param.register_hook(create_freeze_hook(param, element_idx))
+            logger.info_rank0(f"Frozen element {element_idx} of parameter {param_name}")
+
 
 
 def _setup_full_tuning(
