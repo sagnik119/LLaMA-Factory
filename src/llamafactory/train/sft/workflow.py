@@ -80,7 +80,7 @@ def run_sft(
     gen_kwargs["pad_token_id"] = tokenizer.pad_token_id
 
     # Initialize our Trainer
-    if finetuning_args.use_rmsnorm_regularization:
+    if finetuning_args.use_rmsnorm_regularization or finetuning_args.use_variance_regularization:
         trainer = RMSNormRegularizedTrainer(
             model=model,
             args=training_args,
