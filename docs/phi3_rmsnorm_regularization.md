@@ -60,6 +60,38 @@ llamafactory-cli train examples/train_lora/phi3_rmsnorm_regularization.yaml
 python examples/train_lora/train_phi3_rmsnorm.py
 ```
 
+### 4. Multi-GPU Training
+
+For distributed training across multiple GPUs, use the Gloo backend for optimal stability:
+
+```bash
+llamafactory-cli train \
+    --model_name_or_path microsoft/Phi-3-mini-4k-instruct \
+    --stage sft \
+    --do_train \
+    --finetuning_type freeze \
+    --rmsnorm_only_training \
+    --use_rmsnorm_regularization \
+    --rmsnorm_reg_layers "2,4" \
+    --rmsnorm_reg_weight 0.01 \
+    --rmsnorm_reg_target_norm 0.0 \
+    --dataset identity \
+    --template phi \
+    --output_dir ./saves/phi3-rmsnorm-reg-multi \
+    --per_device_train_batch_size 1 \
+    --learning_rate 5e-5 \
+    --max_steps 100 \
+    --bf16 \
+    --ddp_backend gloo
+```
+
+**Important Multi-GPU Notes:**
+- **Use Gloo Backend**: Add `--ddp_backend gloo` for stable distributed training
+- **NCCL Issues**: The default NCCL backend may cause hanging issues with Phi-3 models
+- **GPU Selection**: Use `CUDA_VISIBLE_DEVICES=0,1,2,3` to specify which GPUs to use
+- **Batch Size Scaling**: Total effective batch size = `per_device_train_batch_size × num_gpus`
+- **Synchronization**: RMSNorm hooks are automatically synchronized across all GPUs
+
 ## Technical Details
 
 ### RMSNorm-only Training
@@ -119,6 +151,62 @@ With `rmsnorm_only_training=True`, only RMSNorm parameters will be updated durin
 
 ### Regularization Effect
 The regularization should encourage the row norms of post-attention RMSNorm outputs in layers 2 and 4 to approach the target norm value (0.0 in the example configuration).
+## GUI-Based Training
+
+The RMSNorm regularization functionality is fully integrated into LLaMA-Factory's web-based GUI interface.
+
+### Launching the Web UI
+
+```bash
+llamafactory-cli webui
+```
+
+### Using RMSNorm Regularization in the GUI
+
+1. **Navigate to the Train tab** in the web interface
+2. **Expand the "RMSNorm Regularization" accordion** (located after the SwanLab section)
+3. **Configure the following parameters**:
+   - **RMSNorm Only Training**: Enable to train only RMSNorm parameters
+   - **Use RMSNorm Regularization**: Enable regularization of RMSNorm outputs
+   - **RMSNorm Reg Layers**: Specify layers to regularize (e.g., "2,4" or "1,3,5")
+   - **RMSNorm Reg Weight**: Set regularization weight (slider: 0.0 to 1.0, default: 0.01)
+   - **RMSNorm Reg Target Norm**: Set target norm value (slider: 0.0 to 10.0, default: 0.0)
+
+### GUI Configuration Example
+
+For Phi-3 Mini 4K Instruct with RMSNorm regularization:
+
+1. **Model Settings**:
+   - Model: `microsoft/Phi-3-mini-4k-instruct`
+   - Finetuning Type: `freeze`
+   - Template: `phi`
+
+2. **Training Settings**:
+   - Learning Rate: `5e-5`
+   - Epochs: `3.0`
+   - Batch Size: `1`
+   - Gradient Accumulation: `8`
+
+3. **Freeze Settings**:
+   - Freeze Trainable Modules: `all`
+
+4. **RMSNorm Regularization Settings**:
+   - ✅ RMSNorm Only Training
+   - ✅ Use RMSNorm Regularization
+   - RMSNorm Reg Layers: `2,4`
+   - RMSNorm Reg Weight: `0.01`
+   - RMSNorm Reg Target Norm: `0.0`
+
+5. **Distributed Training** (for multi-GPU):
+   - Add `"ddp_backend": "gloo"` to Extra Args field
+
+### GUI Benefits
+
+- **Visual Parameter Tuning**: Easy adjustment of regularization parameters with sliders
+- **Real-time Validation**: Immediate feedback on configuration errors
+- **Integrated Monitoring**: Built-in loss visualization and training progress tracking
+- **Configuration Saving**: Save and load training configurations for reproducibility
+
 
 ## Troubleshooting
 

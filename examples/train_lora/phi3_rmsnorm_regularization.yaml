@@ -35,6 +35,9 @@ learning_rate: 5.0e-5
 num_train_epochs: 3.0
 lr_scheduler_type: cosine
 warmup_steps: 0.1
+
+### distributed training (for multi-GPU)
+ddp_backend: gloo  # Use Gloo backend for stable multi-GPU training with Phi-3
 fp16: true
 
 ### eval

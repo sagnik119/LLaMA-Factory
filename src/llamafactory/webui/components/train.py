@@ -363,6 +363,26 @@ def create_train_tab(engine: "Engine") -> dict[str, "Component"]:
         )
     )
 
+    with gr.Accordion(open=False) as rmsnorm_tab:
+        with gr.Row():
+            rmsnorm_only_training = gr.Checkbox()
+            use_rmsnorm_regularization = gr.Checkbox()
+            rmsnorm_reg_layers = gr.Textbox(value="2,4", placeholder="e.g., 2,4 or 1,3,5")
+            rmsnorm_reg_weight = gr.Slider(minimum=0, maximum=1, value=0.01, step=0.001)
+            rmsnorm_reg_target_norm = gr.Slider(minimum=0, maximum=10, value=0.0, step=0.1)
+
+    input_elems.update({rmsnorm_only_training, use_rmsnorm_regularization, rmsnorm_reg_layers, rmsnorm_reg_weight, rmsnorm_reg_target_norm})
+    elem_dict.update(
+        dict(
+            rmsnorm_tab=rmsnorm_tab,
+            rmsnorm_only_training=rmsnorm_only_training,
+            use_rmsnorm_regularization=use_rmsnorm_regularization,
+            rmsnorm_reg_layers=rmsnorm_reg_layers,
+            rmsnorm_reg_weight=rmsnorm_reg_weight,
+            rmsnorm_reg_target_norm=rmsnorm_reg_target_norm,
+        )
+    )
+
     with gr.Row():
         cmd_preview_btn = gr.Button()
         arg_save_btn = gr.Button()

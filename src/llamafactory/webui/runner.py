@@ -274,6 +274,16 @@ class Runner:
             args["swanlab_api_key"] = get("train.swanlab_api_key")
             args["swanlab_mode"] = get("train.swanlab_mode")
 
+        # rmsnorm regularization config
+        if get("train.rmsnorm_only_training"):
+            args["rmsnorm_only_training"] = get("train.rmsnorm_only_training")
+        
+        if get("train.use_rmsnorm_regularization"):
+            args["use_rmsnorm_regularization"] = get("train.use_rmsnorm_regularization")
+            args["rmsnorm_reg_layers"] = get("train.rmsnorm_reg_layers")
+            args["rmsnorm_reg_weight"] = get("train.rmsnorm_reg_weight")
+            args["rmsnorm_reg_target_norm"] = get("train.rmsnorm_reg_target_norm")
+
         # eval config
         if get("train.val_size") > 1e-6 and args["stage"] != "ppo":
             args["val_size"] = get("train.val_size")
