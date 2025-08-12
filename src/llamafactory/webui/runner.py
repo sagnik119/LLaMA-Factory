@@ -494,8 +494,25 @@ class Runner:
             return {output_box: ALERTS["err_config_not_found"][lang]}
 
         output_dict: dict[Component, Any] = {output_box: ALERTS["info_config_loaded"][lang]}
+        
+        # Key mapping for compatibility between saved configs and UI element IDs
+        key_mapping = {
+            "model_name_or_path": "top.model_path",
+            "model_path": "top.model_path",
+        }
+        
         for elem_id, value in config_dict.items():
-            output_dict[self.manager.get_elem_by_id(elem_id)] = value
+            # Apply key mapping if needed
+            mapped_elem_id = key_mapping.get(elem_id, elem_id)
+            
+            # Only try to set the value if the element exists in the manager
+            try:
+                element = self.manager.get_elem_by_id(mapped_elem_id)
+                output_dict[element] = value
+            except KeyError:
+                # Skip elements that don't exist in the current UI
+                print(f"Warning: Skipping unknown UI element: {elem_id} (mapped to {mapped_elem_id})")
+                continue
 
         return output_dict
 
@@ -509,7 +526,24 @@ class Runner:
 
             output_dir = get_save_dir(model_name, finetuning_type, output_dir)
             config_dict = load_args(os.path.join(output_dir, LLAMABOARD_CONFIG))  # load llamaboard config
+            
+            # Key mapping for compatibility between saved configs and UI element IDs
+            key_mapping = {
+                "model_name_or_path": "top.model_path",
+                "model_path": "top.model_path",
+            }
+            
             for elem_id, value in config_dict.items():
-                output_dict[self.manager.get_elem_by_id(elem_id)] = value
+                # Apply key mapping if needed
+                mapped_elem_id = key_mapping.get(elem_id, elem_id)
+                
+                # Only try to set the value if the element exists in the manager
+                try:
+                    element = self.manager.get_elem_by_id(mapped_elem_id)
+                    output_dict[element] = value
+                except KeyError:
+                    # Skip elements that don't exist in the current UI
+                    print(f"Warning: Skipping unknown UI element: {elem_id} (mapped to {mapped_elem_id})")
+                    continue
 
         return output_dict
