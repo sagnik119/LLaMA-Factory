@@ -119,8 +119,8 @@ def _apply_rmsnorm_element_caps(model: "PreTrainedModel", finetuning_args: "Fine
             param.data[element_idx] = cap_value
             logger.info_rank0(f"Capped {param_name}[{element_idx}] from {original_value:.6f} to {cap_value:.6f}")
         
-        # Freeze the element if requested
-        if finetuning_args.freeze_capped_elements:
+        # Freeze the element if requested and parameter requires gradients
+        if finetuning_args.freeze_capped_elements and param.requires_grad:
             # Create a custom hook to freeze this specific element
             def create_freeze_hook(param_tensor, idx):
                 def freeze_element_hook(grad):
@@ -131,6 +131,8 @@ def _apply_rmsnorm_element_caps(model: "PreTrainedModel", finetuning_args: "Fine
             
             param.register_hook(create_freeze_hook(param, element_idx))
             logger.info_rank0(f"Frozen element {element_idx} of parameter {param_name}")
+        elif finetuning_args.freeze_capped_elements and not param.requires_grad:
+            logger.info_rank0(f"Skipping freeze hook for {param_name}[{element_idx}] - parameter doesn't require gradients")
 
 
 
