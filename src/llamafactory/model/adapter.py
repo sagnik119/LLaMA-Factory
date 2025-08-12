@@ -35,6 +35,36 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)
 
 
+def _setup_rmsnorm_tuning(
+    model: "PreTrainedModel",
+    finetuning_args: "FinetuningArguments",
+    is_trainable: bool,
+    cast_trainable_params_to_fp32: bool,
+) -> None:
+    """Setup RMSNorm-only fine-tuning by freezing all parameters except RMSNorm layers."""
+    if not is_trainable:
+        return
+
+    logger.info_rank0("Fine-tuning method: RMSNorm-only")
+    
+    # First freeze all parameters
+    for param in model.parameters():
+        param.requires_grad_(False)
+    
+    # Then unfreeze only RMSNorm parameters
+    rmsnorm_count = 0
+    for name, param in model.named_parameters():
+        # Look for RMSNorm layers (common patterns: "norm", "layer_norm", "post_attention_layernorm", "input_layernorm")
+        if any(norm_name in name.lower() for norm_name in ["norm", "layer_norm", "post_attention_layernorm", "input_layernorm"]):
+            param.requires_grad_(True)
+            rmsnorm_count += 1
+            if cast_trainable_params_to_fp32:
+                param.data = param.data.to(torch.float32)
+            logger.info_rank0(f"Unfrozen RMSNorm parameter: {name}")
+    
+    logger.info_rank0(f"Total RMSNorm parameters unfrozen: {rmsnorm_count}")
+
+
 def _setup_full_tuning(
     model: "PreTrainedModel",
     finetuning_args: "FinetuningArguments",
@@ -302,5 +332,9 @@ def init_adapter(
         )
     else:
         raise NotImplementedError(f"Unknown finetuning type: {finetuning_args.finetuning_type}.")
+    
+    # Apply RMSNorm-only training if specified
+    if finetuning_args.rmsnorm_only_training and is_trainable:
+        _setup_rmsnorm_tuning(model, finetuning_args, is_trainable, cast_trainable_params_to_fp32)
 
     return model

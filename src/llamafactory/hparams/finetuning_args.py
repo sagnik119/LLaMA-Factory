@@ -355,6 +355,32 @@ class BAdamArgument:
 
 
 @dataclass
+class RMSNormRegularizationArguments:
+    r"""Arguments pertaining to RMSNorm regularization."""
+
+    use_rmsnorm_regularization: bool = field(
+        default=False,
+        metadata={"help": "Whether or not to use RMSNorm output regularization."},
+    )
+    rmsnorm_reg_layers: str = field(
+        default="2,4",
+        metadata={"help": "Comma-separated list of layer indices to apply RMSNorm regularization (e.g., '2,4')."},
+    )
+    rmsnorm_reg_weight: float = field(
+        default=0.01,
+        metadata={"help": "Weight for the RMSNorm regularization loss."},
+    )
+    rmsnorm_reg_target_norm: float = field(
+        default=1.0,
+        metadata={"help": "Target norm value for RMSNorm regularization."},
+    )
+    rmsnorm_only_training: bool = field(
+        default=False,
+        metadata={"help": "Whether to train only RMSNorm parameters while freezing all others."},
+    )
+
+
+@dataclass
 class SwanLabArguments:
     use_swanlab: bool = field(
         default=False,
@@ -396,7 +422,7 @@ class SwanLabArguments:
 
 @dataclass
 class FinetuningArguments(
-    SwanLabArguments, BAdamArgument, ApolloArguments, GaloreArguments, RLHFArguments, LoraArguments, FreezeArguments
+    SwanLabArguments, RMSNormRegularizationArguments, BAdamArgument, ApolloArguments, GaloreArguments, RLHFArguments, LoraArguments, FreezeArguments
 ):
     r"""Arguments pertaining to which techniques we are going to fine-tuning with."""
 
@@ -470,9 +496,15 @@ class FinetuningArguments(
         self.additional_target: Optional[list[str]] = split_arg(self.additional_target)
         self.galore_target: list[str] = split_arg(self.galore_target)
         self.apollo_target: list[str] = split_arg(self.apollo_target)
+        self.rmsnorm_reg_layers: list[int] = [int(x.strip()) for x in self.rmsnorm_reg_layers.split(",") if x.strip()]
         self.use_ref_model = self.stage == "dpo" and self.pref_loss not in ["orpo", "simpo"]
 
         assert self.finetuning_type in ["lora", "freeze", "full"], "Invalid fine-tuning method."
+        
+        if self.rmsnorm_only_training and self.finetuning_type not in ["freeze", "full"]:
+            from ...extras import logging
+            logger = logging.get_logger(__name__)
+            logger.warning_rank0("RMSNorm-only training works best with 'freeze' or 'full' finetuning types.")
         assert self.ref_model_quantization_bit in [None, 8, 4], "We only accept 4-bit or 8-bit quantization."
         assert self.reward_model_quantization_bit in [None, 8, 4], "We only accept 4-bit or 8-bit quantization."
 
