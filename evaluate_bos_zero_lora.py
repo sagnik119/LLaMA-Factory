@@ -180,6 +180,9 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
             # Debug: Check text content
             if debug_batch_count == 0:
                 logger.info(f"🔍 Debug - Sample text: {batch_texts[0][:100]}...")
+                # Test tokenization of a simple sentence
+                test_tokens = tokenizer("Hello world", add_special_tokens=False)
+                logger.info(f"🔍 Debug - Test tokenization: {test_tokens}")
             
             # Tokenize batch with proper settings
             inputs = tokenizer(
@@ -190,6 +193,13 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 max_length=512,
                 add_special_tokens=False  # We'll add BOS manually
             )
+            
+            # Debug: Check tokenization result
+            if debug_batch_count == 0:
+                logger.info(f"🔍 Debug - Tokenized first text directly:")
+                direct_tokens = tokenizer(batch_texts[0], add_special_tokens=False)
+                logger.info(f"🔍 Debug - Direct tokens: {direct_tokens['input_ids'][:20]}")
+                logger.info(f"🔍 Debug - Batch tokens: {inputs['input_ids'][0][:20].tolist()}")
             
             # Debug: Check original input
             if debug_batch_count == 0:
