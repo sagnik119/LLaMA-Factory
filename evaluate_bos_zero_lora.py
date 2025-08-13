@@ -221,34 +221,53 @@ def generate_samples(model, tokenizer, prompts: List[str], max_length: int = 100
     with torch.no_grad():
         for prompt in tqdm(prompts, desc="Generating"):
             # Tokenize prompt
-            inputs = tokenizer(prompt, return_tensors="pt")
+            inputs = tokenizer(prompt, return_tensors="pt", padding=True)
             
             # Add BOS token
             input_ids = add_bos_tokens_to_batch(inputs['input_ids'], tokenizer)
-            input_ids = input_ids.to(model.device)
+            attention_mask = torch.ones_like(input_ids)
             
-            # Generate with compatibility fix
+            # Move to device
+            input_ids = input_ids.to(model.device)
+            attention_mask = attention_mask.to(model.device)
+            
+            # Generate with comprehensive compatibility fix
             try:
                 outputs = model.generate(
                     input_ids,
+                    attention_mask=attention_mask,
                     max_length=max_length,
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.9,
-                    pad_token_id=tokenizer.pad_token_id
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id
                 )
             except AttributeError as e:
-                if "get_usable_length" in str(e):
-                    # Compatibility fix for transformers version mismatch
-                    outputs = model.generate(
-                        input_ids,
-                        max_length=max_length,
-                        do_sample=True,
-                        temperature=0.7,
-                        top_p=0.9,
-                        pad_token_id=tokenizer.pad_token_id,
-                        use_cache=False  # Disable cache to avoid compatibility issues
-                    )
+                if "seen_tokens" in str(e) or "get_usable_length" in str(e):
+                    # Comprehensive compatibility fix for transformers version mismatch
+                    try:
+                        outputs = model.generate(
+                            input_ids,
+                            attention_mask=attention_mask,
+                            max_length=max_length,
+                            do_sample=True,
+                            temperature=0.7,
+                            top_p=0.9,
+                            pad_token_id=tokenizer.pad_token_id,
+                            eos_token_id=tokenizer.eos_token_id,
+                            use_cache=False  # Disable cache to avoid compatibility issues
+                        )
+                    except Exception as e2:
+                        # Fallback to simple generation
+                        logger.warning(f"Generation failed with cache, trying simple approach: {e2}")
+                        outputs = model.generate(
+                            input_ids,
+                            max_new_tokens=50,  # Use max_new_tokens instead of max_length
+                            do_sample=False,    # Use greedy decoding as fallback
+                            pad_token_id=tokenizer.pad_token_id,
+                            use_cache=False
+                        )
                 else:
                     raise e
             
