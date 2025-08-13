@@ -25,21 +25,24 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 # Add sparsity_subspace_fork to path for evaluation
-sys.path.insert(0, str(Path(__file__).parent / "sparsity_subspace_fork"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "sparsity_subspace_fork"))
 
-try:
-    from run_evaluation import run_evaluation_with_model
-except ImportError as e:
-    print(f"Error importing evaluation modules: {e}")
-    print("Please ensure sparsity_subspace_fork is available in the parent directory")
-    sys.exit(1)
-
-# Setup logging
+# Setup logging first
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Import from sparsity_subspace_fork
+try:
+    from run_evaluation import run_evaluation_with_model
+    logger.info("Successfully imported sparsity_subspace_fork evaluation framework")
+except ImportError as e:
+    print(f"Error importing sparsity evaluation framework: {e}")
+    print("Please ensure sparsity_subspace_fork is available in the parent directory")
+    print("The script requires the sparsity_subspace_fork framework to function properly")
+    sys.exit(1)
 
 
 class RMSNormModelLoader:
@@ -315,9 +318,8 @@ class RMSNormEvaluator:
             eval_output_dir = self.output_dir / f"rmsnorm_evaluation_{timestamp}"
             eval_output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Run evaluation using the sparsity_subspace_fork evaluation system
-            logger.info("Running evaluation with lm-evaluation-harness...")
-            
+            # Run evaluation using sparsity_subspace_fork framework
+            logger.info("Running evaluation with sparsity_subspace_fork framework...")
             results = run_evaluation_with_model(
                 model=model,
                 model_name=self.base_model,
@@ -332,7 +334,8 @@ class RMSNormEvaluator:
                 "evaluation_timestamp": timestamp,
                 "tasks": tasks,
                 "limit": limit,
-                "rmsnorm_config": rmsnorm_config
+                "rmsnorm_config": rmsnorm_config,
+                "evaluation_framework": "sparsity_subspace_fork"
             }
             
             metadata_file = eval_output_dir / "rmsnorm_evaluation_metadata.json"
