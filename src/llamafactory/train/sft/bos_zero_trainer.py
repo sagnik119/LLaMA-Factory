@@ -19,6 +19,24 @@ from typing import Dict, Any, Optional, Union
 from transformers import Trainer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
+
+class BOSZeroFunction(torch.autograd.Function):
+    """Custom autograd function for BOS token zeroing with proper gradient handling."""
+    
+    @staticmethod
+    def forward(ctx, input_tensor):
+        """Forward pass: zero out position 0 completely."""
+        output = input_tensor.clone()
+        output[:, 0, :] = 0.0  # Complete zeroing
+        return output
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        """Backward pass: zero out gradients for position 0, pass through others."""
+        grad_input = grad_output.clone()
+        grad_input[:, 0, :] = 0.0  # No gradients flow to position 0
+        return grad_input
+
 from ...extras.logging import get_logger
 from .trainer import CustomSeq2SeqTrainer
 
@@ -43,7 +61,7 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
         logger.info("🎯 BOSZeroTrainer initialized")
         logger.info("   - BOS tokens will be added to sequences")
         logger.info("   - Position 0 embeddings will be COMPLETELY ZEROED OUT")
-        logger.info("   - Gradients detached from position 0 to prevent NaN issues")
+        logger.info("   - Custom autograd function prevents gradients to position 0")
         logger.info("   - This forces the model to ignore BOS token information entirely")
     
     def _setup_embedding_hook(self):
@@ -71,12 +89,8 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             try:
                 # output shape: (batch_size, seq_len, hidden_size)
                 if output.dim() == 3 and output.size(1) > 0:
-                    # Create a new tensor to avoid in-place modification
-                    zeroed_output = output.clone()
-                    # Detach position 0 from computation graph and zero it out completely
-                    # This prevents gradient flow to position 0 while maintaining gradients for other positions
-                    zeroed_output[:, 0, :] = output[:, 0, :].detach() * 0.0
-                    return zeroed_output
+                    # Use custom autograd function for proper gradient handling
+                    return BOSZeroFunction.apply(output)
                         
                 return output
             except Exception as e:
