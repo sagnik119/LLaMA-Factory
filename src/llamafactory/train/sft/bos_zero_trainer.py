@@ -19,24 +19,6 @@ from typing import Dict, Any, Optional, Union
 from transformers import Trainer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
-
-class BOSZeroFunction(torch.autograd.Function):
-    """Custom autograd function for BOS token zeroing with proper gradient handling."""
-    
-    @staticmethod
-    def forward(ctx, input_tensor):
-        """Forward pass: zero out position 0 completely."""
-        output = input_tensor.clone()
-        output[:, 0, :] = 0.0  # Complete zeroing
-        return output
-    
-    @staticmethod
-    def backward(ctx, grad_output):
-        """Backward pass: zero out gradients for position 0, pass through others."""
-        grad_input = grad_output.clone()
-        grad_input[:, 0, :] = 0.0  # No gradients flow to position 0
-        return grad_input
-
 from ...extras.logging import get_logger
 from .trainer import CustomSeq2SeqTrainer
 
@@ -56,13 +38,19 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.embedding_hook_handle = None
+        
+        # Get BOS scaling factor from finetuning args (default to 0.01 for 99% reduction)
+        finetuning_args = kwargs.get('finetuning_args')
+        self.bos_scaling_factor = getattr(finetuning_args, 'bos_scaling_factor', 0.01) if finetuning_args else 0.01
+        
         self._setup_embedding_hook()
         
+        reduction_percent = (1 - self.bos_scaling_factor) * 100
         logger.info("🎯 BOSZeroTrainer initialized")
         logger.info("   - BOS tokens will be added to sequences")
-        logger.info("   - Position 0 embeddings will be COMPLETELY ZEROED OUT")
-        logger.info("   - Custom autograd function prevents gradients to position 0")
-        logger.info("   - This forces the model to ignore BOS token information entirely")
+        logger.info(f"   - Position 0 embeddings will be scaled by {self.bos_scaling_factor} ({reduction_percent:.0f}% reduction)")
+        logger.info("   - This maintains gradient stability while minimizing BOS influence")
+        logger.info("   - Reduced BOS influence forces model adaptation")
     
     def _setup_embedding_hook(self):
         """Set up hook to zero out BOS token embeddings at position 0."""
@@ -85,16 +73,18 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             return
         
         def bos_zero_hook(module, input, output):
-            """Hook to completely zero out embeddings at position 0 (BOS token position)."""
+            """Hook to heavily reduce embeddings at position 0 (BOS token position)."""
             try:
                 # output shape: (batch_size, seq_len, hidden_size)
                 if output.dim() == 3 and output.size(1) > 0:
-                    # Use custom autograd function for proper gradient handling
-                    return BOSZeroFunction.apply(output)
+                    # Create scaled output with very small scaling factor (99% reduction)
+                    scaled_output = output.clone()
+                    scaled_output[:, 0, :] = output[:, 0, :] * self.bos_scaling_factor
+                    return scaled_output
                         
                 return output
             except Exception as e:
-                logger.warning(f"⚠️ Error in BOS zeroing hook: {e}")
+                logger.warning(f"⚠️ Error in BOS scaling hook: {e}")
                 return output
         
         # Register the hook
