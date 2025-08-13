@@ -105,6 +105,10 @@ class SupervisedDatasetProcessor(DatasetProcessor):
                 videos=examples["_videos"][i] or [],
                 audios=examples["_audios"][i] or [],
             )
+            
+            # Apply BOS token processing if enabled
+            input_ids, labels = self._apply_bos_processing(input_ids, labels)
+            
             model_inputs["input_ids"].append(input_ids)
             model_inputs["attention_mask"].append([1] * len(input_ids))
             model_inputs["labels"].append(labels)
@@ -113,6 +117,43 @@ class SupervisedDatasetProcessor(DatasetProcessor):
             model_inputs["audios"].append(examples["_audios"][i])
 
         return model_inputs
+    
+    def _apply_bos_processing(self, input_ids: list[int], labels: list[int]) -> tuple[list[int], list[int]]:
+        """Apply BOS token processing if BOS zero training is enabled."""
+        # Check if BOS zero training is enabled via data_args
+        use_bos_zero = getattr(self.data_args, 'use_bos_zero_training', False)
+        
+        if not use_bos_zero:
+            return input_ids, labels
+            
+        # Get BOS token ID
+        bos_token_id = self.tokenizer.bos_token_id
+        if bos_token_id is None:
+            # If no BOS token is defined, use the EOS token or pad token as fallback
+            bos_token_id = self.tokenizer.eos_token_id or self.tokenizer.pad_token_id
+            if bos_token_id is None:
+                logger.warning_rank0("⚠️ No BOS, EOS, or PAD token found. Using token ID 1 as BOS.")
+                bos_token_id = 1
+        
+        # Check if BOS token is already at the beginning
+        if len(input_ids) > 0 and input_ids[0] != bos_token_id:
+            # Add BOS token at the beginning
+            new_input_ids = [bos_token_id] + input_ids
+            # Add -100 (ignore index) for the BOS token position in labels
+            new_labels = [IGNORE_INDEX] + labels
+            
+            # Truncate if necessary to maintain max length
+            max_length = self.data_args.cutoff_len
+            if len(new_input_ids) > max_length:
+                new_input_ids = new_input_ids[:max_length]
+                new_labels = new_labels[:max_length]
+            
+            logger.info_rank0(f"✅ Added BOS token ({bos_token_id}) to sequence of length {len(input_ids)} -> {len(new_input_ids)}")
+            return new_input_ids, new_labels
+        else:
+            logger.info_rank0(f"🔍 BOS token ({bos_token_id}) already present at position 0")
+        
+        return input_ids, labels
 
     def print_data_example(self, example: dict[str, list[int]]) -> None:
         valid_labels = list(filter(lambda x: x != IGNORE_INDEX, example["labels"]))
@@ -148,6 +189,10 @@ class PackedSupervisedDatasetProcessor(SupervisedDatasetProcessor):
                 videos=examples["_videos"][i] or [],
                 audios=examples["_audios"][i] or [],
             )
+            
+            # Apply BOS token processing if enabled
+            input_ids, labels = self._apply_bos_processing(input_ids, labels)
+            
             length = len(input_ids)
             if length > self.data_args.cutoff_len:
                 logger.warning_rank0(f"Dropped lengthy example with length {length} > {self.data_args.cutoff_len}.")

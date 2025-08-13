@@ -45,9 +45,15 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
     
     def _setup_embedding_hook(self):
         """Set up hook to zero out BOS token embeddings at position 0."""
-        # Find the embedding layer
+        # Find the embedding layer - handle both regular and wrapped models
         embedding_layer = None
-        for name, module in self.model.named_modules():
+        model_to_search = self.model
+        
+        # Handle DDP/FSDP wrapped models
+        if hasattr(self.model, 'module'):
+            model_to_search = self.model.module
+            
+        for name, module in model_to_search.named_modules():
             if isinstance(module, nn.Embedding) and 'embed_tokens' in name:
                 embedding_layer = module
                 logger.info(f"✅ Found embedding layer: {name}")
@@ -59,12 +65,17 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
         
         def bos_zero_hook(module, input, output):
             """Hook to zero out embeddings at position 0 (BOS token position)."""
-            # output shape: (batch_size, seq_len, hidden_size)
-            if output.dim() == 3 and output.size(1) > 0:
-                # Zero out the embedding for position 0 (BOS token) for all batch items
-                output[:, 0, :] = 0.0
-                
-            return output
+            try:
+                # output shape: (batch_size, seq_len, hidden_size)
+                if output.dim() == 3 and output.size(1) > 0:
+                    # Zero out the embedding for position 0 (BOS token) for all batch items
+                    with torch.no_grad():
+                        output[:, 0, :] = 0.0
+                        
+                return output
+            except Exception as e:
+                logger.warning(f"⚠️ Error in BOS zero hook: {e}")
+                return output
         
         # Register the hook
         self.embedding_hook_handle = embedding_layer.register_forward_hook(bos_zero_hook)
@@ -77,14 +88,17 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             self.embedding_hook_handle = None
             logger.info("🧹 BOS zeroing hook removed")
     
-    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], num_items_in_batch=None) -> torch.Tensor:
         """
         Perform a training step with BOS token handling.
         """
         # Ensure BOS tokens are present (this should be handled by data preprocessing)
         # The hook will automatically zero out position 0 embeddings
         
-        return super().training_step(model, inputs)
+        if num_items_in_batch is not None:
+            return super().training_step(model, inputs, num_items_in_batch)
+        else:
+            return super().training_step(model, inputs)
     
     def prediction_step(
         self,

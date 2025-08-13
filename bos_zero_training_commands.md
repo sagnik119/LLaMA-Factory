@@ -2,6 +2,16 @@
 
 Quick reference for running the BOS token zeroing experiment with LoRA fine-tuning.
 
+## ⚠️ Recent Fixes Applied
+
+✅ **Fixed training_step signature** - Resolved `TypeError: BOSZeroTrainer.training_step() takes 3 positional arguments but 4 were given`
+
+✅ **Improved BOS token processing** - Enhanced data preprocessing to properly add BOS tokens
+
+✅ **Enhanced multi-GPU support** - Improved hook handling for DDP/FSDP wrapped models
+
+✅ **Better error handling** - Added try-catch blocks and more robust hook implementation
+
 ## Training Commands
 
 ### Method 1: Using the Training Script
@@ -229,3 +239,62 @@ saves/phi3-bos-zero-lora-alpaca/
 - **Memory Usage**: ~8-12GB GPU memory with batch_size=2
 - **Model Size**: LoRA adapter ~50-100MB (much smaller than full model)
 - **Convergence**: Should see loss decrease within first few hundred steps
+
+## 🔧 Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. TypeError: training_step() takes 3 positional arguments but 4 were given
+**Status**: ✅ **FIXED**
+- **Cause**: Incorrect method signature in BOSZeroTrainer
+- **Solution**: Updated training_step method to handle both old and new transformers versions
+
+#### 2. BOS tokens not being added to sequences
+**Symptoms**: Training example shows sequences not starting with BOS token (ID: 1)
+**Status**: ✅ **FIXED**
+- **Cause**: BOS processing not integrated into data pipeline
+- **Solution**: Enhanced SupervisedDatasetProcessor with BOS token handling
+
+#### 3. Multi-GPU training failures
+**Status**: ✅ **FIXED**
+- **Cause**: Hook registration issues with DDP/FSDP wrapped models
+- **Solution**: Improved embedding layer detection for wrapped models
+
+### Monitoring Success
+
+Look for these log messages to confirm proper operation:
+
+```
+[INFO] ✅ Found embedding layer: base_model.model.model.embed_tokens
+[INFO] ✅ BOS zeroing hook registered on embedding layer
+[INFO] 🎯 BOSZeroTrainer initialized
+[INFO] ✅ Added BOS token (1) to sequence of length X -> Y
+```
+
+### Testing the Implementation
+
+Run the debug script to test with minimal resources:
+```bash
+python debug_bos_zero.py
+```
+
+### Performance Tips
+
+1. **Start with single GPU** for initial testing:
+   ```bash
+   CUDA_VISIBLE_DEVICES=0 llamafactory-cli train examples/train_lora/phi3_bos_zero_lora.yaml
+   ```
+
+2. **Use smaller datasets** for debugging:
+   ```yaml
+   max_samples: 100  # Add to YAML config
+   ```
+
+3. **Monitor GPU memory** usage during training
+
+### Expected Training Behavior
+
+- **BOS Token Addition**: Sequences will be prepended with BOS token (ID: 1)
+- **Position 0 Zeroing**: Embeddings at position 0 will be zeroed during forward pass
+- **Label Masking**: BOS token positions will have labels set to -100 (ignored in loss)
+- **LoRA Training**: Only LoRA parameters will be updated, not the full model
