@@ -263,9 +263,22 @@ class RMSNormEvaluator:
                             past_key_values=None,
                             use_cache=False
                         )
+                        
+                        # Check for valid loss
+                        if outputs.loss is None or torch.isnan(outputs.loss) or torch.isinf(outputs.loss):
+                            logger.warning(f"Invalid loss at position {begin_loc}: {outputs.loss}")
+                            continue
+                            
                         neg_log_likelihood = outputs.loss * trg_len
+                        
+                        # Additional check for the computed value
+                        if torch.isnan(neg_log_likelihood) or torch.isinf(neg_log_likelihood):
+                            logger.warning(f"Invalid neg_log_likelihood at position {begin_loc}: {neg_log_likelihood}")
+                            continue
+                            
                         nlls.append(neg_log_likelihood)
                         total_tokens += trg_len
+                        
                     except Exception as e:
                         logger.warning(f"Error processing chunk at position {begin_loc}: {e}")
                         continue
@@ -277,9 +290,24 @@ class RMSNormEvaluator:
             logger.error("No tokens were processed successfully")
             return {"perplexity": float("inf"), "loss": float("inf"), "total_tokens": 0}
         
-        # Calculate perplexity
+        # Calculate perplexity with numerical stability checks
         avg_loss = total_loss / total_tokens
-        perplexity = math.exp(avg_loss)
+        
+        # Check for NaN or infinite loss
+        if math.isnan(avg_loss) or math.isinf(avg_loss):
+            logger.error(f"Invalid loss value: {avg_loss}")
+            return {"perplexity": float("inf"), "loss": avg_loss, "total_tokens": total_tokens}
+        
+        # Calculate perplexity with overflow protection
+        try:
+            if avg_loss > 100:  # Prevent overflow in exp()
+                perplexity = float("inf")
+                logger.warning(f"Loss too high ({avg_loss:.4f}), setting perplexity to inf")
+            else:
+                perplexity = math.exp(avg_loss)
+        except OverflowError:
+            perplexity = float("inf")
+            logger.warning("Overflow in perplexity calculation, setting to inf")
         
         results = {
             "perplexity": perplexity,
