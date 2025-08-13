@@ -378,8 +378,8 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate Phi-3 model with RMSNorm weights using LLaMA-Factory")
     parser.add_argument("--model_name", default="microsoft/Phi-3-mini-4k-instruct", 
                        help="Model name or path")
-    parser.add_argument("--rmsnorm_weights_path", required=True,
-                       help="Path to the saved RMSNorm weights (.pt file)")
+    parser.add_argument("--rmsnorm_weights_path", required=False, default=None,
+                       help="Path to the saved RMSNorm weights (.pt file). If not provided, evaluates baseline model.")
     parser.add_argument("--dataset", default="wikitext", 
                        help="Dataset name for perplexity evaluation")
     parser.add_argument("--dataset_config", default="wikitext-2-raw-v1",
