@@ -275,11 +275,11 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 logger.info(f"🔍 Debug - First few targets: {target_tokens[0][:10].tolist()}")
             
             # Calculate cross-entropy loss on actual content tokens (not BOS)
-            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            loss_fct = nn.CrossEntropyLoss(reduction='none', ignore_index=tokenizer.pad_token_id)
             losses = loss_fct(prediction_logits.view(-1, prediction_logits.size(-1)), target_tokens.view(-1))
             losses = losses.view(target_tokens.shape)
             
-            # Apply attention mask to ignore padding tokens
+            # Apply attention mask to ignore padding tokens (redundant but safe)
             masked_losses = losses * target_attention_mask
             
             # Debug: Check loss values and token predictions
@@ -297,8 +297,9 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 target_token_ids = target_tokens[0]
                 attention_mask_first = target_attention_mask[0]
                 
-                # Show first 15 valid (non-padding) tokens
-                valid_positions = torch.where(attention_mask_first > 0)[0][:15]
+                # Show first 15 valid (non-padding) tokens only
+                valid_mask = (attention_mask_first > 0) & (target_token_ids != tokenizer.pad_token_id)
+                valid_positions = torch.where(valid_mask)[0][:15]
                 
                 logger.info(f"🔍 Debug - Position | Predicted | Target | Match | Loss")
                 logger.info(f"🔍 Debug - ---------|-----------|--------|-------|------")
@@ -318,10 +319,11 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                     except:
                         logger.info(f"🔍 Debug - {pos:8d} | {pred_id:9d} | {target_id:6d} | {match:5s} | {loss_val:5.2f}")
                 
-                # Calculate accuracy for this batch
-                correct_predictions = (predicted_token_ids == target_token_ids) & (attention_mask_first > 0)
-                accuracy = correct_predictions.sum().float() / attention_mask_first.sum().float()
-                logger.info(f"🔍 Debug - First sequence accuracy: {accuracy.item():.4f}")
+                # Calculate accuracy only on valid (non-padding) tokens
+                valid_predictions = (predicted_token_ids == target_token_ids) & valid_mask
+                accuracy = valid_predictions.sum().float() / valid_mask.sum().float()
+                logger.info(f"🔍 Debug - Valid token accuracy: {accuracy.item():.4f}")
+                logger.info(f"🔍 Debug - Valid tokens count: {valid_mask.sum().item()}")
             
             batch_loss = masked_losses.sum().item()
             batch_tokens = target_attention_mask.sum().item()
