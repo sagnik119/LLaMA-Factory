@@ -79,7 +79,6 @@ class RMSNormEvaluator:
             "adapter_name_or_path": None,
             "mixture_of_depths": None,
             "train_from_scratch": False,
-            "compute_dtype": torch.float16,
             "print_param_status": False,
             # Finetuning args
             "stage": "sft",
