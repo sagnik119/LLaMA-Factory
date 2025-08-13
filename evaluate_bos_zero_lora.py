@@ -173,8 +173,20 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
             input_ids = input_ids.to(model.device)
             attention_mask = attention_mask.to(model.device)
             
-            # Forward pass
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids)
+            # Forward pass with compatibility fix
+            try:
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids)
+            except AttributeError as e:
+                if "get_usable_length" in str(e):
+                    # Compatibility fix for transformers version mismatch
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=input_ids,
+                        use_cache=False  # Disable cache to avoid compatibility issues
+                    )
+                else:
+                    raise e
             
             # Calculate loss (ignore padding tokens)
             shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -215,15 +227,30 @@ def generate_samples(model, tokenizer, prompts: List[str], max_length: int = 100
             input_ids = add_bos_tokens_to_batch(inputs['input_ids'], tokenizer)
             input_ids = input_ids.to(model.device)
             
-            # Generate
-            outputs = model.generate(
-                input_ids,
-                max_length=max_length,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                pad_token_id=tokenizer.pad_token_id
-            )
+            # Generate with compatibility fix
+            try:
+                outputs = model.generate(
+                    input_ids,
+                    max_length=max_length,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    pad_token_id=tokenizer.pad_token_id
+                )
+            except AttributeError as e:
+                if "get_usable_length" in str(e):
+                    # Compatibility fix for transformers version mismatch
+                    outputs = model.generate(
+                        input_ids,
+                        max_length=max_length,
+                        do_sample=True,
+                        temperature=0.7,
+                        top_p=0.9,
+                        pad_token_id=tokenizer.pad_token_id,
+                        use_cache=False  # Disable cache to avoid compatibility issues
+                    )
+                else:
+                    raise e
             
             # Decode
             generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
