@@ -500,6 +500,10 @@ class FinetuningArguments(
         default=False,
         metadata={"help": "Whether or not to disable the shuffling of the training set."},
     )
+    use_bos_zero_training: bool = field(
+        default=False,
+        metadata={"help": "Whether to use BOS token zeroing training (adds BOS tokens and zeros out position 0 embeddings)."},
+    )
     early_stopping_steps: Optional[int] = field(
         default=None,
         metadata={"help": "Number of steps to stop training if the `metric_for_best_model` does not improve."},
