@@ -256,7 +256,13 @@ class RMSNormEvaluator:
                     target_ids[:, :-trg_len] = -100
                     
                     try:
-                        outputs = self.model(input_ids_chunk, labels=target_ids)
+                        # Use past_key_values=None to avoid cache issues
+                        outputs = self.model(
+                            input_ids_chunk,
+                            labels=target_ids,
+                            past_key_values=None,
+                            use_cache=False
+                        )
                         neg_log_likelihood = outputs.loss * trg_len
                         nlls.append(neg_log_likelihood)
                         total_tokens += trg_len
@@ -311,14 +317,16 @@ class RMSNormEvaluator:
                     # Tokenize prompt
                     inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
                     
-                    # Generate
+                    # Generate with cache disabled to avoid compatibility issues
                     outputs = self.model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
                         do_sample=True,
                         temperature=0.7,
                         top_p=0.9,
-                        pad_token_id=self.tokenizer.eos_token_id
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        use_cache=False,
+                        past_key_values=None
                     )
                     
                     # Decode
