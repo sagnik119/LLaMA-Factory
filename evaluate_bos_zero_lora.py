@@ -251,38 +251,80 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 else:
                     raise e
             
-            # Manual loss calculation with proper label handling
+            # Manual loss calculation with proper BOS handling
             logits = outputs.logits
             
-            # Shift for next token prediction: input[:-1] -> target[1:]
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            shift_attention_mask = attention_mask[..., 1:].contiguous()
+            # CORRECT BOS ZERO PERPLEXITY CALCULATION:
+            # Input: [BOS, token1, token2, token3, ...]  (BOS embedding is scaled)
+            # Logits: [logit_for_token1, logit_for_token2, logit_for_token3, ...]
+            # Target: [token1, token2, token3, ...]  (exclude BOS from targets)
+            
+            # Remove BOS prediction (first logit) and BOS target (first token)
+            # logits[1:] predicts tokens[1:] (token1, token2, ...)
+            # input_ids[1:] are the targets (token1, token2, ...)
+            prediction_logits = logits[:, 1:, :].contiguous()  # Skip BOS prediction
+            target_tokens = input_ids[:, 1:].contiguous()      # Skip BOS token
+            target_attention_mask = attention_mask[:, 1:].contiguous()  # Skip BOS attention
             
             # Debug: Check shapes and values
             if debug_batch_count == 0:
-                logger.info(f"🔍 Debug - Logits shape: {logits.shape}")
-                logger.info(f"🔍 Debug - Shift logits shape: {shift_logits.shape}")
-                logger.info(f"🔍 Debug - Shift labels shape: {shift_labels.shape}")
-                logger.info(f"🔍 Debug - Attention mask sum: {shift_attention_mask.sum().item()}")
+                logger.info(f"🔍 Debug - Original logits shape: {logits.shape}")
+                logger.info(f"🔍 Debug - Prediction logits shape (skip BOS): {prediction_logits.shape}")
+                logger.info(f"🔍 Debug - Target tokens shape (skip BOS): {target_tokens.shape}")
+                logger.info(f"🔍 Debug - Target attention mask sum: {target_attention_mask.sum().item()}")
+                logger.info(f"🔍 Debug - First few targets: {target_tokens[0][:10].tolist()}")
             
-            # Calculate cross-entropy loss
+            # Calculate cross-entropy loss on actual content tokens (not BOS)
             loss_fct = nn.CrossEntropyLoss(reduction='none')
-            losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            losses = losses.view(shift_labels.shape)
+            losses = loss_fct(prediction_logits.view(-1, prediction_logits.size(-1)), target_tokens.view(-1))
+            losses = losses.view(target_tokens.shape)
             
             # Apply attention mask to ignore padding tokens
-            masked_losses = losses * shift_attention_mask
+            masked_losses = losses * target_attention_mask
             
-            # Debug: Check loss values
+            # Debug: Check loss values and token predictions
             if debug_batch_count == 0:
-                valid_losses = masked_losses[shift_attention_mask > 0]
+                valid_losses = masked_losses[target_attention_mask > 0]
                 logger.info(f"🔍 Debug - Raw loss range: {losses.min().item():.4f} to {losses.max().item():.4f}")
                 logger.info(f"🔍 Debug - Valid loss mean: {valid_losses.mean().item():.4f}")
                 logger.info(f"🔍 Debug - Valid loss count: {len(valid_losses)}")
+                
+                # Debug: Show prediction vs target tokens
+                logger.info(f"🔍 Debug - Prediction vs Target Token Analysis:")
+                
+                # Get predicted tokens (argmax of logits)
+                predicted_token_ids = torch.argmax(prediction_logits[0], dim=-1)
+                target_token_ids = target_tokens[0]
+                attention_mask_first = target_attention_mask[0]
+                
+                # Show first 15 valid (non-padding) tokens
+                valid_positions = torch.where(attention_mask_first > 0)[0][:15]
+                
+                logger.info(f"🔍 Debug - Position | Predicted | Target | Match | Loss")
+                logger.info(f"🔍 Debug - ---------|-----------|--------|-------|------")
+                
+                for i, pos in enumerate(valid_positions):
+                    pred_id = predicted_token_ids[pos].item()
+                    target_id = target_token_ids[pos].item()
+                    match = "✓" if pred_id == target_id else "✗"
+                    loss_val = losses[0][pos].item()
+                    
+                    # Decode tokens for readability
+                    try:
+                        pred_token = tokenizer.decode([pred_id])
+                        target_token = tokenizer.decode([target_id])
+                        logger.info(f"🔍 Debug - {pos:8d} | {pred_id:9d} | {target_id:6d} | {match:5s} | {loss_val:5.2f}")
+                        logger.info(f"🔍 Debug -          | '{pred_token:>9s}' | '{target_token:>6s}' |       |")
+                    except:
+                        logger.info(f"🔍 Debug - {pos:8d} | {pred_id:9d} | {target_id:6d} | {match:5s} | {loss_val:5.2f}")
+                
+                # Calculate accuracy for this batch
+                correct_predictions = (predicted_token_ids == target_token_ids) & (attention_mask_first > 0)
+                accuracy = correct_predictions.sum().float() / attention_mask_first.sum().float()
+                logger.info(f"🔍 Debug - First sequence accuracy: {accuracy.item():.4f}")
             
             batch_loss = masked_losses.sum().item()
-            batch_tokens = shift_attention_mask.sum().item()
+            batch_tokens = target_attention_mask.sum().item()
             
             total_loss += batch_loss
             total_tokens += batch_tokens
