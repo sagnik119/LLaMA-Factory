@@ -74,9 +74,11 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             try:
                 # output shape: (batch_size, seq_len, hidden_size)
                 if output.dim() == 3 and output.size(1) > 0:
-                    # Apply scaling factor instead of complete zeroing to avoid NaN gradients
-                    # This maintains gradient flow while significantly reducing BOS influence
-                    output[:, 0, :] = output[:, 0, :] * self.bos_scaling_factor
+                    # Create a new tensor instead of in-place modification to avoid autograd issues
+                    # Apply scaling factor to position 0 while keeping other positions unchanged
+                    scaled_output = output.clone()
+                    scaled_output[:, 0, :] = output[:, 0, :] * self.bos_scaling_factor
+                    return scaled_output
                         
                 return output
             except Exception as e:
