@@ -184,22 +184,40 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 test_tokens = tokenizer("Hello world", add_special_tokens=False)
                 logger.info(f"🔍 Debug - Test tokenization: {test_tokens}")
             
-            # Tokenize batch with proper settings
-            inputs = tokenizer(
-                batch_texts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512,
-                add_special_tokens=False  # We'll add BOS manually
-            )
+            # Fix: Tokenize each text individually then batch manually
+            tokenized_texts = []
+            for text in batch_texts:
+                tokens = tokenizer(
+                    text,
+                    add_special_tokens=False,
+                    truncation=True,
+                    max_length=512
+                )
+                tokenized_texts.append(tokens['input_ids'])
+            
+            # Manual padding to create batch
+            max_len = max(len(tokens) for tokens in tokenized_texts)
+            padded_input_ids = []
+            
+            for tokens in tokenized_texts:
+                if len(tokens) < max_len:
+                    # Pad with tokenizer's pad token
+                    padded = tokens + [tokenizer.pad_token_id] * (max_len - len(tokens))
+                else:
+                    padded = tokens
+                padded_input_ids.append(padded)
+            
+            # Create inputs dict
+            inputs = {
+                'input_ids': torch.tensor(padded_input_ids),
+                'attention_mask': torch.ones_like(torch.tensor(padded_input_ids))
+            }
             
             # Debug: Check tokenization result
             if debug_batch_count == 0:
-                logger.info(f"🔍 Debug - Tokenized first text directly:")
-                direct_tokens = tokenizer(batch_texts[0], add_special_tokens=False)
-                logger.info(f"🔍 Debug - Direct tokens: {direct_tokens['input_ids'][:20]}")
-                logger.info(f"🔍 Debug - Batch tokens: {inputs['input_ids'][0][:20].tolist()}")
+                logger.info(f"🔍 Debug - Fixed tokenization:")
+                logger.info(f"🔍 Debug - First sequence tokens: {inputs['input_ids'][0][:20].tolist()}")
+                logger.info(f"🔍 Debug - Pad token ID: {tokenizer.pad_token_id}")
             
             # Debug: Check original input
             if debug_batch_count == 0:
