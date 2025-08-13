@@ -20,12 +20,22 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# Add LLaMA-Factory to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-from llamafactory.hparams import get_eval_args, ModelArguments, DataArguments, EvaluationArguments, FinetuningArguments
-from llamafactory.model import load_model, load_tokenizer
-from llamafactory.data import get_template_and_fix_tokenizer
+# Try to import LLaMA-Factory components, fall back to standalone if there are dependency issues
+try:
+    # Add LLaMA-Factory to path
+    sys.path.insert(0, str(Path(__file__).parent / "src"))
+    
+    from llamafactory.hparams import get_eval_args, ModelArguments, DataArguments, EvaluationArguments, FinetuningArguments
+    from llamafactory.model import load_model, load_tokenizer
+    from llamafactory.data import get_template_and_fix_tokenizer
+    
+    LLAMAFACTORY_AVAILABLE = True
+    print("LLaMA-Factory imports successful - using integrated evaluation")
+    
+except Exception as e:
+    print(f"LLaMA-Factory import failed: {e}")
+    print("Falling back to standalone evaluation mode")
+    LLAMAFACTORY_AVAILABLE = False
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,17 +43,22 @@ logger = logging.getLogger(__name__)
 
 
 class RMSNormEvaluator:
-    """Evaluator for models with fine-tuned RMSNorm weights using LLaMA-Factory framework."""
+    """Evaluator for models with fine-tuned RMSNorm weights with LLaMA-Factory integration or standalone fallback."""
     
-    def __init__(self, model_name: str = "microsoft/Phi-3-mini-4k-instruct", 
+    def __init__(self, model_name: str = "microsoft/Phi-3-mini-4k-instruct",
                  rmsnorm_weights_path: Optional[str] = None):
         self.model_name = model_name
         self.rmsnorm_weights_path = rmsnorm_weights_path
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_llamafactory = LLAMAFACTORY_AVAILABLE
         
-        # Initialize LLaMA-Factory components
-        self._setup_llamafactory_args()
-        self._load_model_and_tokenizer()
+        if self.use_llamafactory:
+            # Initialize LLaMA-Factory components
+            self._setup_llamafactory_args()
+            self._load_model_and_tokenizer()
+        else:
+            # Use standalone loading
+            self._load_model_and_tokenizer_standalone()
         
         if rmsnorm_weights_path:
             self._apply_rmsnorm_weights()
@@ -52,6 +67,7 @@ class RMSNormEvaluator:
         """Setup LLaMA-Factory arguments for model loading."""
         # Create minimal arguments for model loading
         args_dict = {
+            # Model args
             "model_name_or_path": self.model_name,
             "trust_remote_code": True,
             "use_fast_tokenizer": True,
@@ -68,6 +84,19 @@ class RMSNormEvaluator:
             # Finetuning args
             "stage": "sft",
             "finetuning_type": "full",
+            # Evaluation args - required
+            "task": "mmlu_test",  # Required parameter for EvaluationArguments
+            "task_dir": "evaluation",
+            "batch_size": 4,
+            "seed": 42,
+            "lang": "en",
+            "n_shot": 0,  # 0-shot evaluation as requested
+            "save_dir": None,
+            # Data args
+            "dataset": "alpaca_en",
+            "dataset_dir": "data",
+            "template": "phi",
+            "cutoff_len": 1024,
         }
         
         # Parse arguments using LLaMA-Factory's system
@@ -75,7 +104,7 @@ class RMSNormEvaluator:
     
     def _load_model_and_tokenizer(self):
         """Load model and tokenizer using LLaMA-Factory's loading system."""
-        logger.info(f"Loading model and tokenizer: {self.model_name}")
+        logger.info(f"Loading model and tokenizer with LLaMA-Factory: {self.model_name}")
         
         # Load tokenizer
         tokenizer_module = load_tokenizer(self.model_args)
@@ -87,11 +116,40 @@ class RMSNormEvaluator:
         
         # Load model (not trainable for evaluation)
         self.model = load_model(
-            self.tokenizer, 
-            self.model_args, 
-            self.finetuning_args, 
+            self.tokenizer,
+            self.model_args,
+            self.finetuning_args,
             is_trainable=False
         )
+        
+        logger.info(f"Model loaded successfully on device: {self.model.device}")
+    
+    def _load_model_and_tokenizer_standalone(self):
+        """Load model and tokenizer using standalone transformers."""
+        logger.info(f"Loading model and tokenizer standalone: {self.model_name}")
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            padding_side="right"
+        )
+        
+        # Ensure pad token is set
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        # Load model
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            torch_dtype=torch.float16,
+            device_map="auto"
+        )
+        
+        self.model.eval()
+        self.processor = None
+        self.template = None
         
         logger.info(f"Model loaded successfully on device: {self.model.device}")
     
