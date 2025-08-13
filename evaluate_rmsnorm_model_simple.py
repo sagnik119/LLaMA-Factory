@@ -26,14 +26,9 @@ from datetime import datetime
 # Add LLaMA-Factory to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-try:
-    from llamafactory.chat import ChatModel
-    from llamafactory.extras.env import VERSION
-    from llamafactory.hparams import get_infer_args
-except ImportError as e:
-    print(f"Error importing LLaMA-Factory modules: {e}")
-    print("Please ensure you're running this script from the LLaMA-Factory root directory")
-    sys.exit(1)
+# We don't actually need LLaMA-Factory modules for this evaluation
+# Just use transformers and datasets directly
+logger.info("Using direct transformers integration (no LLaMA-Factory dependencies)")
 
 # Setup logging
 logging.basicConfig(
