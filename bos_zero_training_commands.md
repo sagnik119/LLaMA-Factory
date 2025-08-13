@@ -10,7 +10,9 @@ Quick reference for running the BOS token zeroing experiment with LoRA fine-tuni
 
 ✅ **Enhanced multi-GPU support** - Improved hook handling for DDP/FSDP wrapped models
 
-✅ **Better error handling** - Added try-catch blocks and more robust hook implementation
+✅ **Fixed NaN gradient issue** - Changed from complete zeroing to scaling (0.1 factor) to maintain gradient flow
+
+✅ **Added configurable scaling** - New `bos_scaling_factor` parameter for fine-tuning the BOS reduction
 
 ## Training Commands
 
@@ -298,3 +300,23 @@ python debug_bos_zero.py
 - **Position 0 Zeroing**: Embeddings at position 0 will be zeroed during forward pass
 - **Label Masking**: BOS token positions will have labels set to -100 (ignored in loss)
 - **LoRA Training**: Only LoRA parameters will be updated, not the full model
+
+
+#### 4. NaN gradients causing training failure
+**Status**: ✅ **FIXED**
+- **Cause**: Complete zeroing of embeddings broke gradient flow
+- **Solution**: Changed to scaling approach (default 0.1 factor) instead of complete zeroing
+- **Configuration**: Adjustable via `bos_scaling_factor` parameter (0.0 = complete zeroing, 1.0 = no scaling)
+
+### Configuration Options
+
+#### BOS Scaling Factor
+```yaml
+bos_scaling_factor: 0.1  # Default: 90% reduction while maintaining gradients
+```
+
+**Recommended values:**
+- `0.1` (default): 90% reduction, stable gradients
+- `0.05`: 95% reduction, more aggressive
+- `0.2`: 80% reduction, more conservative
+- `0.0`: Complete zeroing (may cause NaN gradients)

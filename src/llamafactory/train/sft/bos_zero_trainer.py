@@ -37,11 +37,17 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.embedding_hook_handle = None
+        
+        # Get BOS scaling factor from finetuning args (default to 0.1 for 90% reduction)
+        finetuning_args = kwargs.get('finetuning_args')
+        self.bos_scaling_factor = getattr(finetuning_args, 'bos_scaling_factor', 0.1) if finetuning_args else 0.1
+        
         self._setup_embedding_hook()
         
         logger.info("🎯 BOSZeroTrainer initialized")
         logger.info("   - BOS tokens will be added to sequences")
-        logger.info("   - Position 0 embeddings will be zeroed out")
+        logger.info(f"   - Position 0 embeddings will be scaled by {self.bos_scaling_factor} (not completely zeroed)")
+        logger.info("   - This prevents NaN gradients while still reducing BOS influence")
     
     def _setup_embedding_hook(self):
         """Set up hook to zero out BOS token embeddings at position 0."""
@@ -64,17 +70,17 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             return
         
         def bos_zero_hook(module, input, output):
-            """Hook to zero out embeddings at position 0 (BOS token position)."""
+            """Hook to reduce embeddings at position 0 (BOS token position)."""
             try:
                 # output shape: (batch_size, seq_len, hidden_size)
                 if output.dim() == 3 and output.size(1) > 0:
-                    # Zero out the embedding for position 0 (BOS token) for all batch items
-                    with torch.no_grad():
-                        output[:, 0, :] = 0.0
+                    # Apply scaling factor instead of complete zeroing to avoid NaN gradients
+                    # This maintains gradient flow while significantly reducing BOS influence
+                    output[:, 0, :] = output[:, 0, :] * self.bos_scaling_factor
                         
                 return output
             except Exception as e:
-                logger.warning(f"⚠️ Error in BOS zero hook: {e}")
+                logger.warning(f"⚠️ Error in BOS scaling hook: {e}")
                 return output
         
         # Register the hook

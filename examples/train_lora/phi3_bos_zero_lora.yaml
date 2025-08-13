@@ -49,3 +49,4 @@ metric_for_best_model: eval_loss
 
 ### BOS Token Zeroing Configuration
 use_bos_zero_training: true
+bos_scaling_factor: 0.1  # Scale BOS embeddings by 0.1 (90% reduction) to avoid NaN gradients
