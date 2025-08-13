@@ -502,11 +502,7 @@ class FinetuningArguments(
     )
     use_bos_zero_training: bool = field(
         default=False,
-        metadata={"help": "Whether to use BOS token zeroing training (adds BOS tokens and scales down position 0 embeddings)."},
-    )
-    bos_scaling_factor: float = field(
-        default=0.1,
-        metadata={"help": "Scaling factor for BOS token embeddings (0.0 = complete zeroing, 1.0 = no scaling). Default 0.1 reduces BOS influence by 90% while maintaining gradient flow."},
+        metadata={"help": "Whether to use BOS token zeroing training (adds BOS tokens and completely zeros out position 0 embeddings)."},
     )
     early_stopping_steps: Optional[int] = field(
         default=None,

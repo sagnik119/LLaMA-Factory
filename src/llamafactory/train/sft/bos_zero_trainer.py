@@ -38,17 +38,13 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.embedding_hook_handle = None
-        
-        # Get BOS scaling factor from finetuning args (default to 0.1 for 90% reduction)
-        finetuning_args = kwargs.get('finetuning_args')
-        self.bos_scaling_factor = getattr(finetuning_args, 'bos_scaling_factor', 0.1) if finetuning_args else 0.1
-        
         self._setup_embedding_hook()
         
         logger.info("🎯 BOSZeroTrainer initialized")
         logger.info("   - BOS tokens will be added to sequences")
-        logger.info(f"   - Position 0 embeddings will be scaled by {self.bos_scaling_factor} (not completely zeroed)")
-        logger.info("   - This prevents NaN gradients while still reducing BOS influence")
+        logger.info("   - Position 0 embeddings will be COMPLETELY ZEROED OUT")
+        logger.info("   - Gradients detached from position 0 to prevent NaN issues")
+        logger.info("   - This forces the model to ignore BOS token information entirely")
     
     def _setup_embedding_hook(self):
         """Set up hook to zero out BOS token embeddings at position 0."""
@@ -71,19 +67,20 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
             return
         
         def bos_zero_hook(module, input, output):
-            """Hook to reduce embeddings at position 0 (BOS token position)."""
+            """Hook to completely zero out embeddings at position 0 (BOS token position)."""
             try:
                 # output shape: (batch_size, seq_len, hidden_size)
                 if output.dim() == 3 and output.size(1) > 0:
-                    # Create a new tensor instead of in-place modification to avoid autograd issues
-                    # Apply scaling factor to position 0 while keeping other positions unchanged
-                    scaled_output = output.clone()
-                    scaled_output[:, 0, :] = output[:, 0, :] * self.bos_scaling_factor
-                    return scaled_output
+                    # Create a new tensor to avoid in-place modification
+                    zeroed_output = output.clone()
+                    # Detach position 0 from computation graph and zero it out completely
+                    # This prevents gradient flow to position 0 while maintaining gradients for other positions
+                    zeroed_output[:, 0, :] = output[:, 0, :].detach() * 0.0
+                    return zeroed_output
                         
                 return output
             except Exception as e:
-                logger.warning(f"⚠️ Error in BOS scaling hook: {e}")
+                logger.warning(f"⚠️ Error in BOS zeroing hook: {e}")
                 return output
         
         # Register the hook
