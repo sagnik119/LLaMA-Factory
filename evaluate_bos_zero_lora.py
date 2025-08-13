@@ -172,13 +172,23 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
             batch_end = min(i + batch_size, len(eval_dataset))
             batch_texts = [eval_dataset[j]['text'] for j in range(i, batch_end)]
             
-            # Tokenize batch
+            # Filter out empty or very short texts
+            batch_texts = [text.strip() for text in batch_texts if text and len(text.strip()) > 10]
+            if not batch_texts:
+                continue
+            
+            # Debug: Check text content
+            if debug_batch_count == 0:
+                logger.info(f"🔍 Debug - Sample text: {batch_texts[0][:100]}...")
+            
+            # Tokenize batch with proper settings
             inputs = tokenizer(
                 batch_texts,
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
-                max_length=512
+                max_length=512,
+                add_special_tokens=False  # We'll add BOS manually
             )
             
             # Debug: Check original input
