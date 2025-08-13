@@ -155,8 +155,11 @@ class BOSZeroTrainer(CustomSeq2SeqTrainer):
         run_dir = self._get_output_dir(trial=trial)
         output_dir = os.path.join(run_dir, checkpoint_folder)
         
-        # Call parent save checkpoint
-        super()._save_checkpoint(model, trial, metrics)
+        # Call parent save checkpoint with correct signature
+        if metrics is not None:
+            super()._save_checkpoint(model, trial, metrics)
+        else:
+            super()._save_checkpoint(model, trial)
         
         # Save BOS zeroing configuration to checkpoint
         bos_config = {
