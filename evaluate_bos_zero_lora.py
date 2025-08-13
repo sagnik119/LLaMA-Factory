@@ -62,8 +62,23 @@ class BOSZeroEvaluationHook:
                 if output.dim() == 3 and output.size(1) > 0 and self.apply_scaling:
                     # Create scaled output (same as training)
                     scaled_output = output.clone()
+                    
+                    # Debug: Log hook activation (only first few times)
+                    if not hasattr(self, '_hook_debug_count'):
+                        self._hook_debug_count = 0
+                    
+                    if self._hook_debug_count < 3:
+                        logger.info(f"🎯 BOS scaling hook activated! Batch size: {output.size(0)}, Seq len: {output.size(1)}")
+                        logger.info(f"🎯 Original position 0 norm: {output[:, 0, :].norm().item():.6f}")
+                        self._hook_debug_count += 1
+                    
                     # Scale position 0 embeddings (same as training)
                     scaled_output[:, 0, :] = output[:, 0, :] * self.scaling_factor
+                    
+                    if self._hook_debug_count <= 3:
+                        logger.info(f"🎯 Scaled position 0 norm: {scaled_output[:, 0, :].norm().item():.6f}")
+                        logger.info(f"🎯 Scaling factor applied: {self.scaling_factor}")
+                    
                     return scaled_output
                 return output
             except Exception as e:
@@ -147,6 +162,7 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
     model.eval()
     total_loss = 0.0
     total_tokens = 0
+    debug_batch_count = 0
     
     # Take subset of dataset
     eval_dataset = dataset.select(range(min(max_samples, len(dataset))))
@@ -165,48 +181,89 @@ def evaluate_perplexity(model, tokenizer, dataset, max_samples: int = 1000, batc
                 max_length=512
             )
             
+            # Debug: Check original input
+            if debug_batch_count == 0:
+                logger.info(f"🔍 Debug - Original input_ids shape: {inputs['input_ids'].shape}")
+                logger.info(f"🔍 Debug - First sequence before BOS: {inputs['input_ids'][0][:10].tolist()}")
+            
             # Add BOS tokens (same as training)
             input_ids = add_bos_tokens_to_batch(inputs['input_ids'], tokenizer)
             attention_mask = torch.ones_like(input_ids)
+            
+            # Debug: Check after BOS addition
+            if debug_batch_count == 0:
+                logger.info(f"🔍 Debug - After BOS input_ids shape: {input_ids.shape}")
+                logger.info(f"🔍 Debug - First sequence after BOS: {input_ids[0][:10].tolist()}")
+                logger.info(f"🔍 Debug - BOS token ID: {tokenizer.bos_token_id}")
             
             # Move to device
             input_ids = input_ids.to(model.device)
             attention_mask = attention_mask.to(model.device)
             
-            # Forward pass with compatibility fix
+            # Forward pass WITHOUT labels to avoid double loss calculation
             try:
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids)
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             except AttributeError as e:
                 if "get_usable_length" in str(e):
-                    # Compatibility fix for transformers version mismatch
                     outputs = model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        labels=input_ids,
-                        use_cache=False  # Disable cache to avoid compatibility issues
+                        use_cache=False
                     )
                 else:
                     raise e
             
-            # Calculate loss (ignore padding tokens)
-            shift_logits = outputs.logits[..., :-1, :].contiguous()
+            # Manual loss calculation with proper label handling
+            logits = outputs.logits
+            
+            # Shift for next token prediction: input[:-1] -> target[1:]
+            shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = input_ids[..., 1:].contiguous()
             shift_attention_mask = attention_mask[..., 1:].contiguous()
             
+            # Debug: Check shapes and values
+            if debug_batch_count == 0:
+                logger.info(f"🔍 Debug - Logits shape: {logits.shape}")
+                logger.info(f"🔍 Debug - Shift logits shape: {shift_logits.shape}")
+                logger.info(f"🔍 Debug - Shift labels shape: {shift_labels.shape}")
+                logger.info(f"🔍 Debug - Attention mask sum: {shift_attention_mask.sum().item()}")
+            
+            # Calculate cross-entropy loss
             loss_fct = nn.CrossEntropyLoss(reduction='none')
             losses = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             losses = losses.view(shift_labels.shape)
             
-            # Mask out padding tokens
+            # Apply attention mask to ignore padding tokens
             masked_losses = losses * shift_attention_mask
-            total_loss += masked_losses.sum().item()
-            total_tokens += shift_attention_mask.sum().item()
+            
+            # Debug: Check loss values
+            if debug_batch_count == 0:
+                valid_losses = masked_losses[shift_attention_mask > 0]
+                logger.info(f"🔍 Debug - Raw loss range: {losses.min().item():.4f} to {losses.max().item():.4f}")
+                logger.info(f"🔍 Debug - Valid loss mean: {valid_losses.mean().item():.4f}")
+                logger.info(f"🔍 Debug - Valid loss count: {len(valid_losses)}")
+            
+            batch_loss = masked_losses.sum().item()
+            batch_tokens = shift_attention_mask.sum().item()
+            
+            total_loss += batch_loss
+            total_tokens += batch_tokens
+            
+            debug_batch_count += 1
+            if debug_batch_count >= 3:  # Only debug first few batches
+                break
+    
+    if total_tokens == 0:
+        logger.error("❌ No valid tokens found for perplexity calculation!")
+        return float('inf')
     
     avg_loss = total_loss / total_tokens
     perplexity = torch.exp(torch.tensor(avg_loss)).item()
     
-    logger.info(f"Average loss: {avg_loss:.4f}")
-    logger.info(f"Perplexity: {perplexity:.4f}")
+    logger.info(f"📊 Total loss: {total_loss:.4f}")
+    logger.info(f"📊 Total tokens: {total_tokens}")
+    logger.info(f"📊 Average loss: {avg_loss:.4f}")
+    logger.info(f"📊 Perplexity: {perplexity:.4f}")
     
     return perplexity
 
