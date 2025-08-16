@@ -26,6 +26,7 @@ USAGE = (
     + "|   llamafactory-cli api -h: launch an OpenAI-style API server       |\n"
     + "|   llamafactory-cli chat -h: launch a chat interface in CLI         |\n"
     + "|   llamafactory-cli eval -h: evaluate models                        |\n"
+    + "|   llamafactory-cli comprehensive_eval -h: comprehensive benchmarks |\n"
     + "|   llamafactory-cli export -h: merge LoRA adapters and export model |\n"
     + "|   llamafactory-cli train -h: train models                          |\n"
     + "|   llamafactory-cli webchat -h: launch a chat interface in Web UI   |\n"
@@ -39,6 +40,7 @@ def main():
     from . import launcher
     from .api.app import run_api
     from .chat.chat_model import run_chat
+    from .cli.comprehensive_eval import main as run_comprehensive_eval
     from .eval.evaluator import run_eval
     from .extras import logging
     from .extras.env import VERSION, print_env
@@ -63,6 +65,7 @@ def main():
     COMMAND_MAP = {
         "api": run_api,
         "chat": run_chat,
+        "comprehensive_eval": run_comprehensive_eval,
         "env": print_env,
         "eval": run_eval,
         "export": export_model,

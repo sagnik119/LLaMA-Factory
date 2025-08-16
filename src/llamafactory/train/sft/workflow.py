@@ -28,6 +28,7 @@ from .metric import ComputeAccuracy, ComputeSimilarity, eval_logit_processor
 from .trainer import CustomSeq2SeqTrainer
 from .rmsnorm_trainer import RMSNormRegularizedTrainer
 from .bos_zero_trainer import BOSZeroTrainer
+from .batchnorm_rmsnorm_trainer import BatchNormRMSNormTrainer
 
 
 if TYPE_CHECKING:
@@ -86,7 +87,19 @@ def run_sft(
     gen_kwargs["pad_token_id"] = tokenizer.pad_token_id
 
     # Initialize our Trainer
-    if getattr(finetuning_args, 'use_bos_zero_training', False):
+    if getattr(finetuning_args, 'use_batchnorm_rmsnorm_training', False):
+        trainer = BatchNormRMSNormTrainer(
+            model=model,
+            args=training_args,
+            finetuning_args=finetuning_args,
+            data_collator=data_collator,
+            callbacks=callbacks,
+            gen_kwargs=gen_kwargs,
+            **dataset_module,
+            **tokenizer_module,
+            **metric_module,
+        )
+    elif getattr(finetuning_args, 'use_bos_zero_training', False):
         trainer = BOSZeroTrainer(
             model=model,
             args=training_args,

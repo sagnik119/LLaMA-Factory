@@ -508,6 +508,14 @@ class FinetuningArguments(
         default=0.01,
         metadata={"help": "Scaling factor for BOS token embeddings. Default 0.01 provides 99% reduction while maintaining gradient stability. Use 0.1 for 90% reduction, 0.05 for 95% reduction."},
     )
+    use_batchnorm_rmsnorm_training: bool = field(
+        default=False,
+        metadata={"help": "Whether to add BatchNorm layers after post-attention RMSNorm and apply LoRA to both linear and BatchNorm parameters."},
+    )
+    batchnorm_with_bias: bool = field(
+        default=True,
+        metadata={"help": "Whether to include bias parameters in BatchNorm layers (default: True)."},
+    )
     early_stopping_steps: Optional[int] = field(
         default=None,
         metadata={"help": "Number of steps to stop training if the `metric_for_best_model` does not improve."},
